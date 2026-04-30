@@ -37,6 +37,18 @@ export interface ApiDocument {
   time_spent_minutes: number | null;
 }
 
+export interface ApiPagination {
+  page: number;
+  perPage: number;
+  total: number;
+  totalPages: number;
+}
+
+export interface ApiDocumentsResponse {
+  documents: ApiDocument[];
+  pagination?: ApiPagination;
+}
+
 export function getStoredUser(): ApiUser | null {
   const rawUser = localStorage.getItem(USER_STORAGE_KEY);
   if (!rawUser) return null;

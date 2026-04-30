@@ -1,57 +1,45 @@
-# =========================
-# Node / Package Managers
-# =========================
+# Dependencies
 node_modules/
 .pnpm-store/
+
+# Build output
+dist/
+build/
+coverage/
+*.local
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Logs
+logs/
+*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-# =========================
-# Build / Output
-# =========================
-dist/
-build/
-*.local
+# Local/runtime databases
+database/*.db
+database/*.db-*
+database/*.sqlite
+database/*.sqlite3
+database/*.sqbpro
 
-# =========================
-# Environment
-# =========================
-.env
-.env.*
-!.env.example
-
-# =========================
-# Logs
-# =========================
-*.log
-
-# =========================
-# Playwright / Test Artifacts
-# =========================
+# Playwright/test artifacts
 .playwright-cli/
 test-results/
 playwright-report/
 
-# =========================
-# Database (mantendo versionada)
-# =========================
-# NÃO ignorar .db (você quer versionar)
-# Ignorar apenas arquivos de ferramenta/editor
-database/*.sqbpro
-
-# =========================
-# OS / Editor
-# =========================
+# OS/editor files
 .DS_Store
 Thumbs.db
 .vscode/
 .idea/
 
-# =========================
-# Misc
-# =========================
+# Temporary files
 *.tmp
 *.swp
 *.swo

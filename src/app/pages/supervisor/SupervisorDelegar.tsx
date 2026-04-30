@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
-import { ArrowLeft, CheckCircle2, Clipboard, Package, Tags, Truck, Warehouse } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, Clipboard, Package, Search, Tags, Truck, Warehouse } from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { ApiDocument, ApiUser, apiRequest } from '../../services/api';
+import { DocumentsPagination } from '../../components/DocumentsPagination';
+import { ApiDocument, ApiDocumentsResponse, ApiPagination, ApiUser, apiRequest } from '../../services/api';
 
 type OperationType =
   | 'Descarga'
@@ -31,6 +32,14 @@ const iconMap: Record<OperationType, typeof Package> = {
   Expedição: Truck,
 };
 
+const DOCUMENTS_PER_PAGE = 6;
+const emptyPagination: ApiPagination = {
+  page: 1,
+  perPage: DOCUMENTS_PER_PAGE,
+  total: 0,
+  totalPages: 1,
+};
+
 export default function SupervisorDelegar() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -40,6 +49,9 @@ export default function SupervisorDelegar() {
   const [selectedOperation, setSelectedOperation] = useState<OperationType | null>(null);
   const [selectedDocument, setSelectedDocument] = useState<ApiDocument | null>(null);
   const [documents, setDocuments] = useState<ApiDocument[]>([]);
+  const [documentSearch, setDocumentSearch] = useState('');
+  const [documentsPage, setDocumentsPage] = useState(1);
+  const [documentsPagination, setDocumentsPagination] = useState<ApiPagination>(emptyPagination);
   const [isLoadingDocuments, setIsLoadingDocuments] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState('');
@@ -49,6 +61,19 @@ export default function SupervisorDelegar() {
     () => users.filter((user) => user.position === 'SEPARADOR' && user.is_active),
     [users]
   );
+  const documentsQuery = useMemo(() => {
+    if (!selectedOperation) return '';
+
+    const params = new URLSearchParams({
+      operation: selectedOperation,
+      page: String(documentsPage),
+      perPage: String(DOCUMENTS_PER_PAGE),
+    });
+    const search = documentSearch.trim();
+    if (search) params.set('search', search);
+
+    return params.toString();
+  }, [documentSearch, documentsPage, selectedOperation]);
 
   useEffect(() => {
     apiRequest<{ users: ApiUser[] }>('/api/supervisor/users')
@@ -65,6 +90,7 @@ export default function SupervisorDelegar() {
   useEffect(() => {
     if (!selectedOperation) {
       setDocuments([]);
+      setDocumentsPagination(emptyPagination);
       return;
     }
 
@@ -72,15 +98,20 @@ export default function SupervisorDelegar() {
     setError('');
     setSuccess('');
 
-    apiRequest<{ documents: ApiDocument[] }>(
-      `/api/supervisor/documents?operation=${encodeURIComponent(selectedOperation)}`
-    )
-      .then((data) => setDocuments(data.documents))
+    apiRequest<ApiDocumentsResponse>(`/api/supervisor/documents?${documentsQuery}`)
+      .then((data) => {
+        setDocuments(data.documents);
+        setDocumentsPagination(data.pagination || {
+          ...emptyPagination,
+          total: data.documents.length,
+          totalPages: Math.max(1, Math.ceil(data.documents.length / DOCUMENTS_PER_PAGE)),
+        });
+      })
       .catch((error) =>
         setError(error instanceof Error ? error.message : 'Nao foi possivel carregar documentos.')
       )
       .finally(() => setIsLoadingDocuments(false));
-  }, [selectedOperation]);
+  }, [documentsQuery, selectedOperation]);
 
   const handleDelegate = async () => {
     if (!selectedUserId || !selectedOperation || !selectedDocument) return;
@@ -94,6 +125,7 @@ export default function SupervisorDelegar() {
         method: 'POST',
         body: JSON.stringify({
           separador_id: selectedUserId,
+          documento_id: selectedDocument.id,
           tipo_operacao: selectedOperation,
           numero_documento: selectedDocument.document_number,
         }),
@@ -157,6 +189,8 @@ export default function SupervisorDelegar() {
                   onClick={() => {
                     setSelectedOperation(operation.id);
                     setSelectedDocument(null);
+                    setDocumentSearch('');
+                    setDocumentsPage(1);
                   }}
                   className={`p-6 rounded-2xl transition-all ${
                     isSelected
@@ -189,6 +223,25 @@ export default function SupervisorDelegar() {
         {selectedOperation && (
           <section>
             <h2 className="text-xl text-slate-900 dark:text-white mb-3">Documento</h2>
+
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
+              <label className="relative block w-full md:max-w-md">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 dark:text-slate-500" />
+                <input
+                  value={documentSearch}
+                  onChange={(event) => {
+                    setDocumentSearch(event.target.value);
+                    setDocumentsPage(1);
+                    setSelectedDocument(null);
+                  }}
+                  placeholder="Pesquisar documentos"
+                  className="w-full pl-10 pr-4 py-3 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </label>
+              <p className="text-sm text-slate-500 dark:text-slate-400">
+                {documentsPagination.total} documento{documentsPagination.total === 1 ? '' : 's'}
+              </p>
+            </div>
 
             {isLoadingDocuments && (
               <div className="bg-white dark:bg-slate-800 rounded-2xl p-8 text-center text-slate-500 dark:text-slate-300 mb-8">
@@ -242,6 +295,15 @@ export default function SupervisorDelegar() {
                 );
               })}
             </div>
+
+            <DocumentsPagination
+              page={documentsPagination.page}
+              totalPages={documentsPagination.totalPages}
+              onPageChange={(page) => {
+                setDocumentsPage(page);
+                setSelectedDocument(null);
+              }}
+            />
 
             {selectedDocument && (
               <button

@@ -1,11 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
-import { ArrowLeft, CheckCircle2, Clipboard, Package, Tags, Truck, Warehouse } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, Clipboard, Package, Search, Tags, Truck, Warehouse } from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import { DocumentsPagination } from '../components/DocumentsPagination';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { useApp } from '../context/AppContext';
-import { ApiDocument, apiRequest } from '../services/api';
+import { ApiDocument, ApiDocumentsResponse, ApiPagination, apiRequest } from '../services/api';
 
 type OperationType =
   | 'Descarga'
@@ -37,36 +38,66 @@ const iconMap: Record<OperationType, typeof Package> = {
   Expedição: Truck,
 };
 
+const DOCUMENTS_PER_PAGE = 6;
+const emptyPagination: ApiPagination = {
+  page: 1,
+  perPage: DOCUMENTS_PER_PAGE,
+  total: 0,
+  totalPages: 1,
+};
+
 export default function NovaOperacao() {
   const navigate = useNavigate();
   const { startProcess } = useApp();
   const [selectedOperation, setSelectedOperation] = useState<OperationType | null>(null);
   const [selectedDocument, setSelectedDocument] = useState<ApiDocument | null>(null);
   const [documents, setDocuments] = useState<ApiDocument[]>([]);
+  const [documentSearch, setDocumentSearch] = useState('');
+  const [documentsPage, setDocumentsPage] = useState(1);
+  const [documentsPagination, setDocumentsPagination] = useState<ApiPagination>(emptyPagination);
   const [isLoadingDocuments, setIsLoadingDocuments] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
   const [error, setError] = useState('');
 
   const selectedOperationType = operationTypes.find((op) => op.id === selectedOperation);
+  const documentsQuery = useMemo(() => {
+    if (!selectedOperation) return '';
+
+    const params = new URLSearchParams({
+      operation: selectedOperation,
+      page: String(documentsPage),
+      perPage: String(DOCUMENTS_PER_PAGE),
+    });
+    const search = documentSearch.trim();
+    if (search) params.set('search', search);
+
+    return params.toString();
+  }, [documentSearch, documentsPage, selectedOperation]);
 
   useEffect(() => {
     if (!selectedOperation) {
       setDocuments([]);
+      setDocumentsPagination(emptyPagination);
       return;
     }
 
     setIsLoadingDocuments(true);
     setError('');
 
-    apiRequest<{ documents: ApiDocument[] }>(
-      `/api/operator/documents?operation=${encodeURIComponent(selectedOperation)}`
-    )
-      .then((data) => setDocuments(data.documents))
+    apiRequest<ApiDocumentsResponse>(`/api/operator/documents?${documentsQuery}`)
+      .then((data) => {
+        setDocuments(data.documents);
+        setDocumentsPagination(data.pagination || {
+          ...emptyPagination,
+          total: data.documents.length,
+          totalPages: Math.max(1, Math.ceil(data.documents.length / DOCUMENTS_PER_PAGE)),
+        });
+      })
       .catch((error) =>
         setError(error instanceof Error ? error.message : 'Nao foi possivel carregar documentos.')
       )
       .finally(() => setIsLoadingDocuments(false));
-  }, [selectedOperation]);
+  }, [documentsQuery, selectedOperation]);
 
   const handleStartProcess = async () => {
     if (!selectedDocument) return;
@@ -118,6 +149,8 @@ export default function NovaOperacao() {
                 onClick={() => {
                   setSelectedOperation(operation.id);
                   setSelectedDocument(null);
+                  setDocumentSearch('');
+                  setDocumentsPage(1);
                 }}
                 className={`p-6 rounded-2xl transition-all ${
                   isSelected
@@ -148,6 +181,25 @@ export default function NovaOperacao() {
                 {selectedOperationType?.documentType === 'NF Entrada'
                   ? 'Notas fiscais de entrada disponíveis'
                   : 'Pedidos de venda disponíveis'}
+              </p>
+            </div>
+
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
+              <label className="relative block w-full md:max-w-md">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 dark:text-slate-500" />
+                <input
+                  value={documentSearch}
+                  onChange={(event) => {
+                    setDocumentSearch(event.target.value);
+                    setDocumentsPage(1);
+                    setSelectedDocument(null);
+                  }}
+                  placeholder="Pesquisar documentos"
+                  className="w-full pl-10 pr-4 py-3 rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-900 dark:text-slate-100 placeholder:text-gray-400 dark:placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </label>
+              <p className="text-sm text-gray-500 dark:text-slate-400">
+                {documentsPagination.total} documento{documentsPagination.total === 1 ? '' : 's'}
               </p>
             </div>
 
@@ -213,6 +265,15 @@ export default function NovaOperacao() {
                 );
               })}
             </div>
+
+            <DocumentsPagination
+              page={documentsPagination.page}
+              totalPages={documentsPagination.totalPages}
+              onPageChange={(page) => {
+                setDocumentsPage(page);
+                setSelectedDocument(null);
+              }}
+            />
 
             {selectedDocument && (
               <button

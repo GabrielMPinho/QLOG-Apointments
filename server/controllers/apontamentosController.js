@@ -13,12 +13,13 @@ function handleError(res, error) {
 export function createApontamentosRouter(apontamentosService) {
   const router = Router();
 
-  router.post('/iniciar', (req, res) => {
+  router.post('/iniciar', async (req, res) => {
     try {
-      const apontamento = apontamentosService.start({
+      const apontamento = await apontamentosService.start({
         userId: req.user.id,
         tipoOperacao: req.body?.tipo_operacao,
         numeroDocumento: req.body?.numero_documento,
+        documentoId: req.body?.documento_id,
       });
 
       return res.status(201).json({
@@ -31,9 +32,9 @@ export function createApontamentosRouter(apontamentosService) {
     }
   });
 
-  router.post('/encerrar', (req, res) => {
+  router.post('/encerrar', async (req, res) => {
     try {
-      const apontamento = apontamentosService.closeOpenByUser(req.user.id);
+      const apontamento = await apontamentosService.closeOpenByUser(req.user.id);
 
       return res.json({
         sucesso: true,
@@ -45,8 +46,8 @@ export function createApontamentosRouter(apontamentosService) {
     }
   });
 
-  router.get('/abertos', (req, res) => {
-    const apontamentos = apontamentosService.listOpen(req.user.id);
+  router.get('/abertos', async (req, res) => {
+    const apontamentos = await apontamentosService.listOpen(req.user.id);
 
     return res.json({
       apontamentos,
@@ -54,8 +55,8 @@ export function createApontamentosRouter(apontamentosService) {
     });
   });
 
-  router.get('/historico', (req, res) => {
-    const apontamentos = apontamentosService.listHistory(req.user.id);
+  router.get('/historico', async (req, res) => {
+    const apontamentos = await apontamentosService.listHistory(req.user.id);
 
     return res.json({
       apontamentos,

@@ -1,6 +1,6 @@
 import express from 'express';
 import { createApontamentosRouter } from './controllers/apontamentosController.js';
-import { normalizeActive } from './lib/database.js';
+import { isSqlServer, normalizeActive } from './lib/database.js';
 import { normalizeOperationCode } from './lib/operations.js';
 import { initializeDatabase } from './migrations.js';
 import * as apontamentosRepository from './repositories/apontamentosRepository.js';
@@ -22,45 +22,51 @@ const app = express();
 const port = Number(process.env.PORT || 3001);
 const apontamentosService = createApontamentosService(apontamentosRepository);
 
-initializeDatabase();
+if (!isSqlServer) {
+  initializeDatabase();
+}
 
 app.use(express.json());
 
-function getRequester(req) {
+async function getRequester(req) {
   const userId = req.header('x-user-id');
   if (!userId) return null;
   return getUserById(userId);
 }
 
-function requireUser(req, res, next) {
-  const requester = getRequester(req);
+async function requireUser(req, res, next) {
+  try {
+    const requester = await getRequester(req);
 
-  if (!requester || !normalizeActive(requester.is_active)) {
-    return res.status(401).json({ message: 'Usuario nao autenticado.' });
+    if (!requester || !normalizeActive(requester.is_active ?? requester.ativo)) {
+      return res.status(401).json({ message: 'Usuario nao autenticado.' });
+    }
+
+    req.user = requester;
+    return next();
+  } catch (error) {
+    return next(error);
   }
-
-  req.user = requester;
-  return next();
 }
 
-function requireSupervisor(req, res, next) {
-  const requester = getRequester(req);
+async function requireSupervisor(req, res, next) {
+  try {
+    const requester = await getRequester(req);
 
-  if (!requester || !normalizeActive(requester.is_active)) {
-    return res.status(401).json({ message: 'Usuario nao autenticado.' });
+    if (!requester || !normalizeActive(requester.is_active ?? requester.ativo)) {
+      return res.status(401).json({ message: 'Usuario nao autenticado.' });
+    }
+
+    const user = mapUser(requester);
+    if (user.position !== 'SUPERVISOR') {
+      return res.status(403).json({ message: 'Acesso permitido apenas para supervisor.' });
+    }
+
+    req.user = requester;
+    return next();
+  } catch (error) {
+    return next(error);
   }
-
-  if (requester.position !== 'SUPERVISOR') {
-    return res.status(403).json({ message: 'Acesso permitido apenas para supervisor.' });
-  }
-
-  req.user = requester;
-  return next();
-}
-
-function matchesText(value, query) {
-  if (!query) return true;
-  return String(value || '').toLowerCase().includes(String(query).toLowerCase());
 }
 
 function appointmentAsSupervisorRow(apontamento) {
@@ -92,24 +98,33 @@ function appointmentAsSupervisorRow(apontamento) {
   };
 }
 
+function documentsResponse(result) {
+  return Array.isArray(result) ? { documents: result } : result;
+}
+
 app.get('/api/health', (_req, res) => {
-  res.json({ ok: true });
+  res.json({ ok: true, provider: isSqlServer ? 'sqlserver' : 'sqlite' });
 });
 
-app.post('/api/login', (req, res) => {
-  const { username, password } = req.body || {};
+app.post('/api/login', async (req, res, next) => {
+  try {
+    const { username, password } = req.body || {};
 
-  if (!username || !password) {
-    return res.status(400).json({ message: 'Informe usuario e senha.' });
+    if (!username || !password) {
+      return res.status(400).json({ message: 'Informe usuario e senha.' });
+    }
+
+    const user = await getUserByLogin(username);
+    const storedPassword = user?.password_hash ?? user?.senha_hash;
+
+    if (!user || !normalizeActive(user.is_active ?? user.ativo) || storedPassword !== password) {
+      return res.status(401).json({ message: 'Usuario ou senha invalidos.' });
+    }
+
+    return res.json({ user: mapUser(user) });
+  } catch (error) {
+    return next(error);
   }
-
-  const user = getUserByLogin(username);
-
-  if (!user || !normalizeActive(user.is_active) || user.password_hash !== password) {
-    return res.status(401).json({ message: 'Usuario ou senha invalidos.' });
-  }
-
-  return res.json({ user: mapUser(user) });
 });
 
 app.get('/api/me', requireUser, (req, res) => {
@@ -119,115 +134,138 @@ app.get('/api/me', requireUser, (req, res) => {
 app.use('/apontamentos', requireUser, createApontamentosRouter(apontamentosService));
 app.use('/api/apontamentos', requireUser, createApontamentosRouter(apontamentosService));
 
-app.get('/api/supervisor/dashboard', requireSupervisor, (_req, res) => {
-  const users = listUsers();
-  const documents = listDocuments();
-  const apontamentos = apontamentosRepository.listAll();
-
-  res.json({
-    totals: {
-      users: users.length,
-      active_users: users.filter((user) => user.is_active).length,
-      documents: documents.length,
-      open_appointments: apontamentos.filter((item) => !item.data_fim).length,
-      finished_appointments: apontamentos.filter((item) => item.data_fim).length,
-    },
-  });
-});
-
-app.get('/api/supervisor/users', requireSupervisor, (_req, res) => {
-  res.json({ users: listUsers() });
-});
-
-app.post('/api/supervisor/users', requireSupervisor, (req, res) => {
-  const name = String(req.body?.name || '').trim();
-  const username = String(req.body?.username || '').trim();
-  const password = String(req.body?.password || '123456').trim();
-  const position = String(req.body?.position || 'SEPARADOR').trim().toUpperCase();
-
-  if (!name || !username || !password) {
-    return res.status(400).json({ message: 'Nome, username e senha sao obrigatorios.' });
-  }
-
-  if (!['SEPARADOR', 'SUPERVISOR'].includes(position)) {
-    return res.status(400).json({ message: 'Cargo invalido.' });
-  }
-
+app.get('/api/supervisor/dashboard', requireSupervisor, async (_req, res, next) => {
   try {
-    return res.status(201).json({ user: createUser({ name, username, password, position }) });
-  } catch {
-    return res.status(400).json({ message: 'Nao foi possivel criar o usuario.' });
+    const users = await listUsers();
+    const documents = await listDocuments();
+    const apontamentos = await apontamentosRepository.listAll();
+
+    res.json({
+      totals: {
+        users: users.length,
+        active_users: users.filter((user) => user.is_active).length,
+        documents: documents.length,
+        open_appointments: apontamentos.filter((item) => !item.data_fim).length,
+        finished_appointments: apontamentos.filter((item) => item.data_fim).length,
+      },
+    });
+  } catch (error) {
+    next(error);
   }
 });
 
-app.put('/api/supervisor/users/:id/name', requireSupervisor, (req, res) => {
-  const name = String(req.body?.name || '').trim();
-
-  if (!name) {
-    return res.status(400).json({ message: 'Nome obrigatorio.' });
-  }
-
-  return res.json({ user: updateUserName(req.params.id, name) });
-});
-
-app.put('/api/supervisor/users/:id/position', requireSupervisor, (req, res) => {
-  const position = String(req.body?.position || '').trim().toUpperCase();
-
-  if (!['SEPARADOR', 'SUPERVISOR'].includes(position)) {
-    return res.status(400).json({ message: 'Cargo invalido.' });
-  }
-
-  return res.json({ user: updateUserPosition(req.params.id, position) });
-});
-
-app.put('/api/supervisor/users/:id', requireSupervisor, (req, res) => {
-  const name = String(req.body?.name || '').trim();
-  const username = String(req.body?.username || '').trim();
-  const password = String(req.body?.password || '').trim();
-  const position = String(req.body?.position || '').trim().toUpperCase();
-  const isActive = req.body?.is_active !== false;
-
-  if (!name || !username) {
-    return res.status(400).json({ message: 'Nome e username sao obrigatorios.' });
-  }
-
-  if (!['SEPARADOR', 'SUPERVISOR'].includes(position)) {
-    return res.status(400).json({ message: 'Cargo invalido.' });
-  }
-
+app.get('/api/supervisor/users', requireSupervisor, async (_req, res, next) => {
   try {
-    const user = updateUser(req.params.id, { name, username, password, position, isActive });
+    res.json({ users: await listUsers() });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/supervisor/users', requireSupervisor, async (req, res, next) => {
+  try {
+    const name = String(req.body?.name || '').trim();
+    const username = String(req.body?.username || '').trim();
+    const password = String(req.body?.password || '123456').trim();
+    const position = String(req.body?.position || 'SEPARADOR').trim().toUpperCase();
+
+    if (!name || !username || !password) {
+      return res.status(400).json({ message: 'Nome, username e senha sao obrigatorios.' });
+    }
+
+    if (!['SEPARADOR', 'SUPERVISOR'].includes(position)) {
+      return res.status(400).json({ message: 'Cargo invalido.' });
+    }
+
+    return res.status(201).json({ user: await createUser({ name, username, password, position }) });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+app.put('/api/supervisor/users/:id/name', requireSupervisor, async (req, res, next) => {
+  try {
+    const name = String(req.body?.name || '').trim();
+
+    if (!name) {
+      return res.status(400).json({ message: 'Nome obrigatorio.' });
+    }
+
+    return res.json({ user: await updateUserName(req.params.id, name) });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+app.put('/api/supervisor/users/:id/position', requireSupervisor, async (req, res, next) => {
+  try {
+    const position = String(req.body?.position || '').trim().toUpperCase();
+
+    if (!['SEPARADOR', 'SUPERVISOR'].includes(position)) {
+      return res.status(400).json({ message: 'Cargo invalido.' });
+    }
+
+    return res.json({ user: await updateUserPosition(req.params.id, position) });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+app.put('/api/supervisor/users/:id', requireSupervisor, async (req, res, next) => {
+  try {
+    const name = String(req.body?.name || '').trim();
+    const username = String(req.body?.username || '').trim();
+    const password = String(req.body?.password || '').trim();
+    const position = String(req.body?.position || '').trim().toUpperCase();
+    const isActive = req.body?.is_active !== false;
+
+    if (!name || !username) {
+      return res.status(400).json({ message: 'Nome e username sao obrigatorios.' });
+    }
+
+    if (!['SEPARADOR', 'SUPERVISOR'].includes(position)) {
+      return res.status(400).json({ message: 'Cargo invalido.' });
+    }
+
+    const user = await updateUser(req.params.id, { name, username, password, position, isActive });
     if (!user) return res.status(404).json({ message: 'Usuario nao encontrado.' });
     return res.json({ user });
-  } catch {
-    return res.status(400).json({ message: 'Nao foi possivel atualizar o usuario.' });
+  } catch (error) {
+    return next(error);
   }
 });
 
-app.delete('/api/supervisor/users/:id', requireSupervisor, (req, res) => {
-  return res.json({ user: deactivateUser(req.params.id) });
+app.delete('/api/supervisor/users/:id', requireSupervisor, async (req, res, next) => {
+  try {
+    return res.json({ user: await deactivateUser(req.params.id) });
+  } catch (error) {
+    return next(error);
+  }
 });
 
-app.post('/api/supervisor/delegacoes', requireSupervisor, (req, res) => {
+app.post('/api/supervisor/delegacoes', requireSupervisor, async (req, res) => {
   const separadorId = String(req.body?.separador_id || '').trim();
   const tipoOperacao = req.body?.tipo_operacao;
   const numeroDocumento = req.body?.numero_documento;
-  const separador = getUserById(separadorId);
+  const documentoId = req.body?.documento_id;
+  const separador = await getUserById(separadorId);
+  const mappedSeparador = mapUser(separador);
 
-  if (!separador || !normalizeActive(separador.is_active)) {
+  if (!separador || !normalizeActive(separador.is_active ?? separador.ativo)) {
     return res.status(404).json({ message: 'Separador nao encontrado ou inativo.' });
   }
 
-  if (separador.position !== 'SEPARADOR') {
+  if (mappedSeparador.position !== 'SEPARADOR') {
     return res.status(400).json({ message: 'Delegacao permitida apenas para separadores.' });
   }
 
   try {
-    const apontamento = apontamentosService.start({
-      userId: separador.id,
+    const apontamento = await apontamentosService.start({
+      userId: mappedSeparador.id,
       tipoOperacao,
       numeroDocumento,
-      delegatedByUserId: req.user.id,
+      documentoId,
+      delegatedByUserId: mapUser(req.user).id,
     });
 
     return res.status(201).json({
@@ -242,85 +280,106 @@ app.post('/api/supervisor/delegacoes', requireSupervisor, (req, res) => {
   }
 });
 
-app.get('/api/supervisor/users/:id/performance', requireSupervisor, (req, res) => {
-  const user = mapUser(getUserById(req.params.id));
+app.get('/api/supervisor/users/:id/performance', requireSupervisor, async (req, res, next) => {
+  try {
+    const user = mapUser(await getUserById(req.params.id));
 
-  if (!user) {
-    return res.status(404).json({ message: 'Usuario nao encontrado.' });
+    if (!user) {
+      return res.status(404).json({ message: 'Usuario nao encontrado.' });
+    }
+
+    const apontamentos = await apontamentosRepository.listAll({ userId: req.params.id });
+    const finished = apontamentos.filter((item) => item.data_fim);
+    const totalMinutes = finished.reduce((sum, item) => sum + Number(item.time_spent_minutes || 0), 0);
+
+    res.json({
+      user,
+      indicators: {
+        total_done_documents: finished.length,
+        total_doing_documents: apontamentos.filter((item) => !item.data_fim).length,
+        total_cancelled_documents: 0,
+        total_volumes_processed: finished.reduce((sum, item) => sum + item.document.volumes, 0),
+        total_skus_processed: finished.reduce((sum, item) => sum + item.document.skus, 0),
+        average_finished_minutes: finished.length > 0 ? Math.round(totalMinutes / finished.length) : 0,
+      },
+      documents: apontamentos.map(appointmentAsSupervisorRow),
+      apontamentos,
+    });
+  } catch (error) {
+    next(error);
   }
-
-  const apontamentos = apontamentosRepository.listAll({ userId: req.params.id });
-  const finished = apontamentos.filter((item) => item.data_fim);
-  const totalMinutes = finished.reduce((sum, item) => sum + Number(item.time_spent_minutes || 0), 0);
-
-  res.json({
-    user,
-    indicators: {
-      total_done_documents: finished.length,
-      total_doing_documents: apontamentos.filter((item) => !item.data_fim).length,
-      total_cancelled_documents: 0,
-      total_volumes_processed: finished.reduce((sum, item) => sum + item.document.volumes, 0),
-      total_skus_processed: finished.reduce((sum, item) => sum + item.document.skus, 0),
-      average_finished_minutes: finished.length > 0 ? Math.round(totalMinutes / finished.length) : 0,
-    },
-    documents: apontamentos.map(appointmentAsSupervisorRow),
-    apontamentos,
-  });
 });
 
-app.get('/api/supervisor/apontamentos', requireSupervisor, (req, res) => {
-  const { userId, status } = req.query;
-  const filters = {
-    userId,
-    openOnly: status === 'ABERTO',
-    finishedOnly: status === 'FINALIZADO',
-  };
+app.get('/api/supervisor/apontamentos', requireSupervisor, async (req, res, next) => {
+  try {
+    const { userId, status } = req.query;
+    const filters = {
+      userId,
+      openOnly: status === 'ABERTO',
+      finishedOnly: status === 'FINALIZADO',
+    };
 
-  const apontamentos = apontamentosRepository.listAll(filters);
+    const apontamentos = await apontamentosRepository.listAll(filters);
 
-  res.json({
-    apontamentos,
-    processes: apontamentos.map(apontamentosService.toProcess),
-  });
+    res.json({
+      apontamentos,
+      processes: apontamentos.map(apontamentosService.toProcess),
+    });
+  } catch (error) {
+    next(error);
+  }
 });
 
-app.get('/api/supervisor/documents', requireSupervisor, (req, res) => {
-  const { operation, origin, documentNumber, partner } = req.query;
-  const documents = listDocuments({ operation, origin, documentNumber, partner });
+app.get('/api/supervisor/documents', requireSupervisor, async (req, res, next) => {
+  try {
+    const { operation, origin, documentNumber, partner, page, perPage, search } = req.query;
+    const documents = await listDocuments({ operation, origin, documentNumber, partner, page, perPage, search });
 
-  res.json({ documents });
+    res.json(documentsResponse(documents));
+  } catch (error) {
+    next(error);
+  }
 });
 
-app.get('/api/operator/processes', requireUser, (req, res) => {
-  const open = apontamentosService.listOpen(req.user.id);
-  const history = apontamentosService.listHistory(req.user.id);
-  const apontamentos = [...open, ...history];
+app.get('/api/operator/processes', requireUser, async (req, res, next) => {
+  try {
+    const open = await apontamentosService.listOpen(mapUser(req.user).id);
+    const history = await apontamentosService.listHistory(mapUser(req.user).id);
+    const apontamentos = [...open, ...history];
 
-  res.json({
-    apontamentos,
-    processes: apontamentos.map(apontamentosService.toProcess),
-  });
+    res.json({
+      apontamentos,
+      processes: apontamentos.map(apontamentosService.toProcess),
+    });
+  } catch (error) {
+    next(error);
+  }
 });
 
-app.get('/api/operator/documents', requireUser, (req, res) => {
-  const { operation } = req.query;
-  const documents = listDocuments({ operation });
+app.get('/api/operator/documents', requireUser, async (req, res, next) => {
+  try {
+    const { operation, page, perPage, search } = req.query;
+    const documents = await listDocuments({ operation, page, perPage, search });
 
-  res.json({ documents });
+    res.json(documentsResponse(documents));
+  } catch (error) {
+    next(error);
+  }
 });
 
-app.post('/api/operator/documents/:id/start', requireUser, (req, res) => {
-  const document = getDocumentById(req.params.id);
+app.post('/api/operator/documents/:id/start', requireUser, async (req, res) => {
+  const document = await getDocumentById(req.params.id);
 
   if (!document) {
     return res.status(404).json({ message: 'Documento nao encontrado.' });
   }
 
   try {
-    const apontamento = apontamentosService.start({
-      userId: req.user.id,
-      tipoOperacao: normalizeOperationCode(req.body?.tipo_operacao) || document.operation_type_code,
+    const apontamento = await apontamentosService.start({
+      userId: mapUser(req.user).id,
+      tipoOperacao: normalizeOperationCode(req.body?.tipo_operacao),
       numeroDocumento: document.document_number,
+      documentoId: document.id,
     });
 
     return res.status(201).json({
@@ -335,9 +394,9 @@ app.post('/api/operator/documents/:id/start', requireUser, (req, res) => {
   }
 });
 
-app.post('/api/operator/documents/:id/end', requireUser, (req, res) => {
+app.post('/api/operator/documents/:id/end', requireUser, async (req, res) => {
   try {
-    const apontamento = apontamentosService.closeOpenByUser(req.user.id);
+    const apontamento = await apontamentosService.closeOpenByUser(mapUser(req.user).id);
 
     return res.json({
       sucesso: true,
@@ -349,6 +408,11 @@ app.post('/api/operator/documents/:id/end', requireUser, (req, res) => {
       message: error.message || 'Erro interno ao encerrar apontamento.',
     });
   }
+});
+
+app.use((error, _req, res, _next) => {
+  console.error(error);
+  res.status(500).json({ message: 'Erro interno da API.' });
 });
 
 app.listen(port, () => {

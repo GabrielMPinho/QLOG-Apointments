@@ -27,7 +27,7 @@ export function createApontamentosService(apontamentosRepository) {
     };
   }
 
-  function start({ userId, tipoOperacao, numeroDocumento, delegatedByUserId = null }) {
+  async function start({ userId, tipoOperacao, numeroDocumento, documentoId = null, delegatedByUserId = null }) {
     const operationCode = normalizeOperationCode(tipoOperacao);
     const documentNumber = String(numeroDocumento || '').trim();
 
@@ -39,21 +39,28 @@ export function createApontamentosService(apontamentosRepository) {
       throw new BusinessError('Número do documento é obrigatório.', 400);
     }
 
-    const openApontamento = apontamentosRepository.findOpenByUser(userId);
+    const openApontamento = await apontamentosRepository.findOpenByUser(userId);
     if (openApontamento) {
       throw new BusinessError('Você já possui um processo em andamento', 409);
     }
 
-    return apontamentosRepository.createApontamento({
+    const apontamento = await apontamentosRepository.createApontamento({
       userId,
       tipoOperacao: operationCode,
       numeroDocumento: documentNumber,
+      documentoId,
       delegatedByUserId,
     });
+
+    if (!apontamento) {
+      throw new BusinessError('Documento nao encontrado ou indisponivel para esta operacao.', 404);
+    }
+
+    return apontamento;
   }
 
-  function closeOpenByUser(userId) {
-    const openApontamento = apontamentosRepository.findOpenByUser(userId);
+  async function closeOpenByUser(userId) {
+    const openApontamento = await apontamentosRepository.findOpenByUser(userId);
 
     if (!openApontamento) {
       throw new BusinessError('Nenhum processo em andamento encontrado.', 404);
@@ -78,3 +85,4 @@ export function createApontamentosService(apontamentosRepository) {
     listHistory,
   };
 }
+

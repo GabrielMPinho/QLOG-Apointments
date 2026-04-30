@@ -81,6 +81,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const data = await apiRequest<{ process: Process | null }>('/api/apontamentos/iniciar', {
       method: 'POST',
       body: JSON.stringify({
+        documento_id: document.id,
         tipo_operacao: document.operation_type_code || document.operation,
         numero_documento: document.document_number,
       }),
