@@ -2,13 +2,27 @@ import { BarChart3 } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { useEffect, useMemo, useState } from 'react';
 import { ApiDocument, ApiUser, apiRequest } from '../../services/api';
-import { formatDateTime, statusClass, statusLabel } from './format';
+import { formatDateTime } from './format';
 
-const statusOrder = ['DOING', 'DONE', 'AVAILABLE', 'CANCELLED', 'BLOCKED'];
+interface SupervisorAppointment {
+  id: string;
+  user_id: string;
+  user_name: string | null;
+  tipo_operacao_label: string;
+  numero_documento: string;
+  data_inicio: string;
+  data_fim: string | null;
+  document: {
+    partner_name: string;
+    volumes: number;
+    skus: number;
+  };
+}
 
 export default function SupervisorHome() {
   const [users, setUsers] = useState<ApiUser[]>([]);
   const [documents, setDocuments] = useState<ApiDocument[]>([]);
+  const [apontamentos, setApontamentos] = useState<SupervisorAppointment[]>([]);
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(true);
 
@@ -18,13 +32,15 @@ export default function SupervisorHome() {
       setError('');
 
       try {
-        const [usersData, documentsData] = await Promise.all([
+        const [usersData, documentsData, apontamentosData] = await Promise.all([
           apiRequest<{ users: ApiUser[] }>('/api/supervisor/users'),
           apiRequest<{ documents: ApiDocument[] }>('/api/supervisor/documents'),
+          apiRequest<{ apontamentos: SupervisorAppointment[] }>('/api/supervisor/apontamentos'),
         ]);
 
         setUsers(usersData.users);
         setDocuments(documentsData.documents);
+        setApontamentos(apontamentosData.apontamentos);
       } catch (error) {
         setError(error instanceof Error ? error.message : 'Nao foi possivel carregar o overview.');
       } finally {
@@ -35,49 +51,37 @@ export default function SupervisorHome() {
     loadOverview();
   }, []);
 
-  const statusCounts = useMemo(() => {
-    return statusOrder.map((status) => ({
-      status,
-      total: documents.filter((document) => document.status === status).length,
-    }));
-  }, [documents]);
-
   const operationCounts = useMemo(() => {
-    const counts = documents.reduce<Record<string, number>>((acc, document) => {
-      const operation = document.operation || 'Sem operacao';
-      acc[operation] = (acc[operation] || 0) + 1;
+    const counts = apontamentos.reduce<Record<string, number>>((acc, item) => {
+      acc[item.tipo_operacao_label] = (acc[item.tipo_operacao_label] || 0) + 1;
       return acc;
     }, {});
 
     return Object.entries(counts)
       .map(([operation, total]) => ({ operation, total }))
       .sort((a, b) => b.total - a.total);
-  }, [documents]);
+  }, [apontamentos]);
 
   const userRows = useMemo(() => {
     return users
       .filter((item) => item.position === 'SEPARADOR')
       .map((item) => {
-        const userDocuments = documents.filter((document) => document.current_user_id === item.id);
-        const doneDocuments = userDocuments.filter((document) => document.status === 'DONE');
+        const userAppointments = apontamentos.filter((apontamento) => apontamento.user_id === item.id);
+        const finished = userAppointments.filter((apontamento) => apontamento.data_fim);
 
         return {
           user: item,
-          doing: userDocuments.filter((document) => document.status === 'DOING').length,
-          done: doneDocuments.length,
-          cancelled: userDocuments.filter((document) => document.status === 'CANCELLED').length,
-          volumes: doneDocuments.reduce((sum, document) => sum + document.volumes, 0),
-          skus: doneDocuments.reduce((sum, document) => sum + document.skus, 0),
+          doing: userAppointments.filter((apontamento) => !apontamento.data_fim).length,
+          done: finished.length,
+          volumes: finished.reduce((sum, apontamento) => sum + apontamento.document.volumes, 0),
+          skus: finished.reduce((sum, apontamento) => sum + apontamento.document.skus, 0),
         };
       });
-  }, [documents, users]);
+  }, [apontamentos, users]);
 
-  const activeDocuments = documents.filter((document) => document.status === 'DOING');
-  const doneDocuments = documents.filter((document) => document.status === 'DONE');
-  const availableDocuments = documents.filter((document) => document.status === 'AVAILABLE');
-  const blockedDocuments = documents.filter((document) => document.status === 'BLOCKED');
-  const cancelledDocuments = documents.filter((document) => document.status === 'CANCELLED');
-  const maxStatus = Math.max(...statusCounts.map((item) => item.total), 1);
+  const openAppointments = apontamentos.filter((item) => !item.data_fim);
+  const finishedAppointments = apontamentos.filter((item) => item.data_fim);
+  const activeUsers = users.filter((user) => user.is_active);
   const maxOperation = Math.max(...operationCounts.map((item) => item.total), 1);
 
   return (
@@ -85,14 +89,14 @@ export default function SupervisorHome() {
       <div className="flex items-start justify-between mb-6">
         <div>
           <p className="text-sm text-blue-600 dark:text-blue-300 mb-1">Overview</p>
-          <h2 className="text-2xl text-slate-900 dark:text-white">Situacao geral da empresa</h2>
+          <h2 className="text-2xl text-slate-900 dark:text-white">Situação geral da empresa</h2>
           <p className="text-slate-500 dark:text-slate-400">
-            Dados consolidados de usuarios, documentos e operacoes.
+            Documentos são referência; execução operacional é controlada por apontamentos.
           </p>
         </div>
         <div className="hidden md:flex items-center gap-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-3 text-slate-600 dark:text-slate-300">
           <BarChart3 className="w-5 h-5 text-blue-600 dark:text-blue-300" />
-          Consulta no carregamento da pagina
+          Dados carregados da API
         </div>
       </div>
 
@@ -110,32 +114,18 @@ export default function SupervisorHome() {
         <>
           <section className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-6 gap-4 mb-6">
             <MetricCard label="Documentos" value={documents.length} />
-            <MetricCard label="Ativos" value={activeDocuments.length} />
-            <MetricCard label="Finalizados" value={doneDocuments.length} />
-            <MetricCard label="Nao iniciados" value={availableDocuments.length} />
-            <MetricCard label="Bloqueados" value={blockedDocuments.length} />
-            <MetricCard label="Cancelados" value={cancelledDocuments.length} />
+            <MetricCard label="Apontamentos" value={apontamentos.length} />
+            <MetricCard label="Em aberto" value={openAppointments.length} />
+            <MetricCard label="Finalizados" value={finishedAppointments.length} />
+            <MetricCard label="Usuários ativos" value={activeUsers.length} />
+            <MetricCard label="Separadores" value={users.filter((user) => user.position === 'SEPARADOR').length} />
           </section>
 
           <section className="grid grid-cols-1 xl:grid-cols-2 gap-6 mb-6">
             <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-6">
-              <h3 className="text-lg text-slate-900 dark:text-white mb-4">Documentos por status</h3>
+              <h3 className="text-lg text-slate-900 dark:text-white mb-4">Apontamentos por operação</h3>
               <div className="space-y-4">
-                {statusCounts.map((item) => (
-                  <HorizontalBar
-                    key={item.status}
-                    label={statusLabel(item.status)}
-                    value={item.total}
-                    percent={(item.total / maxStatus) * 100}
-                  />
-                ))}
-              </div>
-            </div>
-
-            <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-6">
-              <h3 className="text-lg text-slate-900 dark:text-white mb-4">Documentos por operacao</h3>
-              <div className="space-y-4">
-                {operationCounts.slice(0, 8).map((item) => (
+                {operationCounts.map((item) => (
                   <HorizontalBar
                     key={item.operation}
                     label={item.operation}
@@ -144,40 +134,31 @@ export default function SupervisorHome() {
                   />
                 ))}
                 {operationCounts.length === 0 && (
-                  <p className="text-slate-400 dark:text-slate-500">Nenhum documento encontrado.</p>
+                  <p className="text-slate-400 dark:text-slate-500">Nenhum apontamento encontrado.</p>
                 )}
               </div>
             </div>
-          </section>
 
-          <section className="grid grid-cols-1 xl:grid-cols-2 gap-6">
             <OverviewTable
-              title="Documentos em andamento"
-              headers={['Documento', 'Operacao', 'Usuario', 'Inicio', 'Status']}
-              emptyText="Nenhum documento ativo."
-              rows={activeDocuments.map((document) => [
-                document.document_number,
-                document.operation,
-                document.current_user_name || '-',
-                formatDateTime(document.started_at),
-                <span className={`px-3 py-1 rounded-full text-sm ${statusClass(document.status)}`}>
-                  {statusLabel(document.status)}
-                </span>,
+              title="Processos em aberto"
+              headers={['Documento', 'Operação', 'Usuário', 'Parceiro', 'Início']}
+              emptyText="Nenhum processo em aberto."
+              rows={openAppointments.map((apontamento) => [
+                apontamento.numero_documento,
+                apontamento.tipo_operacao_label,
+                apontamento.user_name || '-',
+                apontamento.document.partner_name || '-',
+                formatDateTime(apontamento.data_inicio),
               ])}
             />
+          </section>
 
+          <section>
             <OverviewTable
               title="Resumo por separador"
-              headers={['Separador', 'Ativos', 'Finalizados', 'Cancelados', 'Volumes', 'SKUs']}
+              headers={['Separador', 'Em aberto', 'Finalizados', 'Volumes', 'SKUs']}
               emptyText="Nenhum separador cadastrado."
-              rows={userRows.map((row) => [
-                row.user.name,
-                row.doing,
-                row.done,
-                row.cancelled,
-                row.volumes,
-                row.skus,
-              ])}
+              rows={userRows.map((row) => [row.user.name, row.doing, row.done, row.volumes, row.skus])}
             />
           </section>
         </>
@@ -264,3 +245,4 @@ function OverviewTable({
     </div>
   );
 }
+

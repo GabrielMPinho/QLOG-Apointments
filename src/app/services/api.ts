@@ -16,6 +16,7 @@ export interface ApiDocument {
   document_number: string;
   series: string;
   type: string;
+  operation_type_code: string;
   operation: string;
   partner_name: string;
   partner_code: string;
@@ -25,12 +26,12 @@ export interface ApiDocument {
   skus: number;
   gross_weight: number;
   net_weight: number;
-  status: string;
-  current_user_id: string | null;
-  current_user_name: string | null;
-  current_username: string | null;
-  started_at: string | null;
-  finished_at: string | null;
+  status?: string;
+  current_user_id?: string | null;
+  current_user_name?: string | null;
+  current_username?: string | null;
+  started_at?: string | null;
+  finished_at?: string | null;
   last_sync_at: string | null;
   created_at: string | null;
   time_spent_minutes: number | null;

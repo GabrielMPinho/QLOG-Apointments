@@ -1,5 +1,6 @@
 import { createContext, ReactNode, useCallback, useContext, useState } from 'react';
 import {
+  ApiDocument,
   ApiUser,
   apiRequest,
   clearStoredUser,
@@ -11,9 +12,9 @@ export interface User extends ApiUser {}
 
 export interface Process {
   id: string;
-  type: 'Descarga' | 'Conferência' | 'Armazenagem' | 'Separação' | 'Expedição';
+  type: 'Descarga' | 'Conferência' | 'Armazenagem' | 'Separação' | 'Expedição' | 'Etiquetagem';
   documentNumber: string;
-  documentType: 'NF Entrada' | 'Pedido Venda';
+  documentType: 'NF Entrada' | 'Pedido Venda' | 'Documento';
   client: string;
   startDate: Date;
   endDate?: Date;
@@ -21,6 +22,8 @@ export interface Process {
   volumes: number;
   skus: number;
   userId: string;
+  delegatedByUserId?: string | null;
+  delegatedByName?: string | null;
 }
 
 interface AppContextType {
@@ -30,8 +33,8 @@ interface AppContextType {
   processes: Process[];
   activeProcess: Process | null;
   refreshProcesses: () => Promise<void>;
-  startProcess: (documentId: string) => Promise<Process | null>;
-  endProcess: (processId: string) => Promise<void>;
+  startProcess: (document: ApiDocument) => Promise<Process | null>;
+  endProcess: () => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -66,24 +69,29 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const refreshProcesses = useCallback(async () => {
     if (!user) return;
 
-    const data = await apiRequest<{ processes: Process[] }>('/api/operator/processes');
-    setProcesses(data.processes.map(mapProcess));
+    const [openData, historyData] = await Promise.all([
+      apiRequest<{ processes: Process[] }>('/api/apontamentos/abertos'),
+      apiRequest<{ processes: Process[] }>('/api/apontamentos/historico'),
+    ]);
+
+    setProcesses([...openData.processes, ...historyData.processes].map(mapProcess));
   }, [user]);
 
-  const startProcess = async (documentId: string): Promise<Process | null> => {
-    const data = await apiRequest<{ process: Process | null }>(
-      `/api/operator/documents/${documentId}/start`,
-      {
-        method: 'POST',
-      }
-    );
+  const startProcess = async (document: ApiDocument): Promise<Process | null> => {
+    const data = await apiRequest<{ process: Process | null }>('/api/apontamentos/iniciar', {
+      method: 'POST',
+      body: JSON.stringify({
+        tipo_operacao: document.operation_type_code || document.operation,
+        numero_documento: document.document_number,
+      }),
+    });
 
     await refreshProcesses();
     return data.process ? mapProcess(data.process) : null;
   };
 
-  const endProcess = async (processId: string) => {
-    await apiRequest(`/api/operator/documents/${processId}/end`, {
+  const endProcess = async () => {
+    await apiRequest('/api/apontamentos/encerrar', {
       method: 'POST',
     });
     await refreshProcesses();

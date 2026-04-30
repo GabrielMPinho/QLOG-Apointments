@@ -9,6 +9,7 @@ import NovaOperacao from './pages/NovaOperacao';
 import Confirmacao from './pages/Confirmacao';
 import Performance from './pages/Performance';
 import SupervisorDocuments from './pages/supervisor/SupervisorDocuments';
+import SupervisorDelegar from './pages/supervisor/SupervisorDelegar';
 import SupervisorHome from './pages/supervisor/SupervisorHome';
 import SupervisorLayout from './pages/supervisor/SupervisorLayout';
 import SupervisorUserPerformance from './pages/supervisor/SupervisorUserPerformance';
@@ -94,6 +95,7 @@ export default function App() {
             >
               <Route index element={<SupervisorHome />} />
               <Route path="users" element={<SupervisorUsers />} />
+              <Route path="delegar" element={<SupervisorDelegar />} />
               <Route path="users/:id/performance" element={<SupervisorUserPerformance />} />
               <Route path="documents" element={<SupervisorDocuments />} />
             </Route>

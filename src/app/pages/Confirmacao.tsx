@@ -1,4 +1,4 @@
-import { useNavigate } from 'react-router';
+import { useNavigate, useSearchParams } from 'react-router';
 import { useApp } from '../context/AppContext';
 import { CheckCircle, AlertCircle, Home } from 'lucide-react';
 import { format } from 'date-fns';
@@ -7,7 +7,9 @@ import { ThemeToggle } from '../components/ThemeToggle';
 
 export default function Confirmacao() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { activeProcess, user } = useApp();
+  const isDelegated = searchParams.get('delegado') === '1' || Boolean(activeProcess?.delegatedByName);
 
   if (!activeProcess) {
     navigate('/home');
@@ -24,8 +26,14 @@ export default function Confirmacao() {
           <div className="bg-blue-100 dark:bg-blue-900/30 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-4">
             <CheckCircle className="w-12 h-12 text-blue-600 dark:text-blue-400" />
           </div>
-          <h1 className="text-3xl text-gray-900 dark:text-white mb-2">Apontamento Iniciado com Sucesso!</h1>
-          <p className="text-gray-500 dark:text-gray-400">Seu processo foi registrado</p>
+          <h1 className="text-3xl text-gray-900 dark:text-white mb-2">
+            {isDelegated ? 'Você foi designado a um processo' : 'Apontamento Iniciado com Sucesso!'}
+          </h1>
+          <p className="text-gray-500 dark:text-gray-400">
+            {isDelegated
+              ? `Você foi designado ao documento ${activeProcess.documentNumber}`
+              : 'Seu processo foi registrado'}
+          </p>
         </div>
 
         <div className="bg-gray-50 dark:bg-gray-700 rounded-2xl p-6 mb-6">
@@ -68,6 +76,12 @@ export default function Confirmacao() {
               <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">Colaborador</p>
               <p className="text-gray-900 dark:text-white">{user?.name}</p>
             </div>
+            {isDelegated && activeProcess.delegatedByName && (
+              <div>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">Designado por</p>
+                <p className="text-gray-900 dark:text-white">{activeProcess.delegatedByName}</p>
+              </div>
+            )}
           </div>
         </div>
 
@@ -75,8 +89,9 @@ export default function Confirmacao() {
           <AlertCircle className="w-5 h-5 text-blue-600 dark:text-blue-400 mt-0.5 flex-shrink-0" />
           <div>
             <p className="text-blue-900 dark:text-blue-300 text-sm">
-              Sistema bloqueado para novo apontamento. Para iniciar outra atividade, encerre este
-              processo primeiro na tela inicial.
+              {isDelegated
+                ? 'Este processo foi designado por um supervisor. Para iniciar outra atividade, encerre este processo primeiro na tela inicial.'
+                : 'Sistema bloqueado para novo apontamento. Para iniciar outra atividade, encerre este processo primeiro na tela inicial.'}
             </p>
           </div>
         </div>

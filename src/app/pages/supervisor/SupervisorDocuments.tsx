@@ -1,7 +1,7 @@
 import { Filter, Search, X } from 'lucide-react';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { apiRequest } from '../../services/api';
-import { formatDate, formatDateTime, statusClass, statusLabel } from './format';
+import { formatDate, formatDateTime } from './format';
 
 export interface SupervisorDocument {
   id: string;
@@ -9,6 +9,7 @@ export interface SupervisorDocument {
   document_number: string;
   series: string;
   type: string;
+  operation_type_code?: string;
   operation: string;
   partner_name: string;
   partner_code: string;
@@ -18,32 +19,22 @@ export interface SupervisorDocument {
   skus: number;
   gross_weight: number;
   net_weight: number;
-  status: string;
-  current_user_id: string | null;
-  current_user_name: string | null;
-  current_username: string | null;
-  started_at: string | null;
-  finished_at: string | null;
+  status?: string;
+  current_user_id?: string | null;
+  current_user_name?: string | null;
+  current_username?: string | null;
+  started_at?: string | null;
+  finished_at?: string | null;
   last_sync_at: string | null;
   created_at: string | null;
-  time_spent_minutes: number | null;
+  time_spent_minutes?: number | null;
 }
 
-const groups = [
-  { title: 'Ativos', status: 'DOING' },
-  { title: 'Finalizados', status: 'DONE' },
-  { title: 'Nao iniciados', status: 'AVAILABLE' },
-  { title: 'Cancelados', status: 'CANCELLED', optional: true },
-  { title: 'Bloqueados', status: 'BLOCKED', optional: true },
-];
-
 const emptyFilters = {
-  status: '',
   operation: '',
   origin: '',
   documentNumber: '',
   partner: '',
-  currentUser: '',
 };
 
 export default function SupervisorDocuments() {
@@ -97,7 +88,9 @@ export default function SupervisorDocuments() {
     <div className="max-w-7xl mx-auto">
       <header className="mb-5">
         <h1 className="text-2xl text-slate-900 dark:text-white">Documentos</h1>
-        <p className="text-slate-500 dark:text-slate-400">Monitoramento operacional</p>
+        <p className="text-slate-500 dark:text-slate-400">
+          Catálogo de referência. O andamento operacional é controlado por apontamentos.
+        </p>
       </header>
 
       <main>
@@ -109,31 +102,19 @@ export default function SupervisorDocuments() {
             <Filter className="w-5 h-5 text-blue-600 dark:text-blue-300" />
             <h2 className="text-lg text-slate-900 dark:text-white">Filtros</h2>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-3">
-            <select
-              value={filters.status}
-              onChange={(event) => updateFilter('status', event.target.value)}
-              className="px-3 py-3 rounded-xl border border-slate-300 dark:border-slate-600 dark:bg-slate-900 dark:text-white"
-            >
-              <option value="">Status</option>
-              <option value="DOING">Ativos</option>
-              <option value="DONE">Finalizados</option>
-              <option value="AVAILABLE">Nao iniciados</option>
-              <option value="CANCELLED">Cancelados</option>
-              <option value="BLOCKED">Bloqueados</option>
-            </select>
-
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
             <select
               value={filters.operation}
               onChange={(event) => updateFilter('operation', event.target.value)}
               className="px-3 py-3 rounded-xl border border-slate-300 dark:border-slate-600 dark:bg-slate-900 dark:text-white"
             >
-              <option value="">Operacao</option>
-              <option value="Descarga">Descarga</option>
-              <option value="Conferencia">Conferencia</option>
-              <option value="Armazenagem">Armazenagem</option>
-              <option value="Separacao">Separacao</option>
-              <option value="Expedicao">Expedicao</option>
+              <option value="">Operação</option>
+              <option value="DESCARGA">Descarga</option>
+              <option value="CONFERENCIA">Conferência</option>
+              <option value="ARMAZENAGEM">Armazenagem</option>
+              <option value="SEPARACAO">Separação</option>
+              <option value="ETIQUETAGEM">Etiquetagem</option>
+              <option value="EXPEDICAO">Expedição</option>
             </select>
 
             <select
@@ -149,7 +130,7 @@ export default function SupervisorDocuments() {
             <input
               value={filters.documentNumber}
               onChange={(event) => updateFilter('documentNumber', event.target.value)}
-              placeholder="Numero"
+              placeholder="Número"
               className="px-3 py-3 rounded-xl border border-slate-300 dark:border-slate-600 dark:bg-slate-900 dark:text-white"
             />
 
@@ -157,13 +138,6 @@ export default function SupervisorDocuments() {
               value={filters.partner}
               onChange={(event) => updateFilter('partner', event.target.value)}
               placeholder="Parceiro"
-              className="px-3 py-3 rounded-xl border border-slate-300 dark:border-slate-600 dark:bg-slate-900 dark:text-white"
-            />
-
-            <input
-              value={filters.currentUser}
-              onChange={(event) => updateFilter('currentUser', event.target.value)}
-              placeholder="Usuario atual"
               className="px-3 py-3 rounded-xl border border-slate-300 dark:border-slate-600 dark:bg-slate-900 dark:text-white"
             />
           </div>
@@ -192,29 +166,13 @@ export default function SupervisorDocuments() {
           </div>
         )}
 
-        {isLoading && (
+        {isLoading ? (
           <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-6 text-slate-500 dark:text-slate-300">
             Carregando documentos...
           </div>
+        ) : (
+          <DocumentTable documents={documents} />
         )}
-
-        {!isLoading &&
-          groups.map((group) => {
-            const groupDocuments = documents.filter((document) => document.status === group.status);
-            if (group.optional && groupDocuments.length === 0) return null;
-
-            return (
-              <section key={group.status} className="mb-8">
-                <div className="flex items-center justify-between mb-3">
-                  <h2 className="text-lg text-slate-900 dark:text-white">{group.title}</h2>
-                  <span className="text-sm text-slate-500 dark:text-slate-400">
-                    {groupDocuments.length} documento(s)
-                  </span>
-                </div>
-                <DocumentTable documents={groupDocuments} />
-              </section>
-            );
-          })}
       </main>
     </div>
   );
@@ -224,30 +182,26 @@ function DocumentTable({ documents }: { documents: SupervisorDocument[] }) {
   return (
     <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl overflow-hidden">
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[1700px]">
+        <table className="w-full min-w-[1400px]">
           <thead className="bg-slate-100 dark:bg-slate-900/60">
             <tr>
               {[
                 'ID',
                 'Origem',
-                'Numero do documento',
-                'Serie',
+                'Número do documento',
+                'Série',
                 'Tipo',
-                'Operacao',
+                'Operação',
                 'Parceiro',
-                'Codigo do parceiro',
+                'Código do parceiro',
                 'Loja do parceiro',
                 'Data do documento',
                 'Volumes',
                 'SKUs',
                 'Peso bruto',
-                'Peso liquido',
-                'Status',
-                'Usuario atual',
-                'Iniciado em',
-                'Finalizado em',
-                'Ultima sincronizacao',
-                'Data de criacao',
+                'Peso líquido',
+                'Última sincronização',
+                'Data de criação',
               ].map((header) => (
                 <th key={header} className="text-left px-4 py-3 text-sm text-slate-600 dark:text-slate-300">
                   {header}
@@ -274,20 +228,6 @@ function DocumentTable({ documents }: { documents: SupervisorDocument[] }) {
                 <td className="px-4 py-3 text-slate-700 dark:text-slate-300">{document.skus}</td>
                 <td className="px-4 py-3 text-slate-700 dark:text-slate-300">{document.gross_weight}</td>
                 <td className="px-4 py-3 text-slate-700 dark:text-slate-300">{document.net_weight}</td>
-                <td className="px-4 py-3">
-                  <span className={`px-3 py-1 rounded-full text-sm ${statusClass(document.status)}`}>
-                    {statusLabel(document.status)}
-                  </span>
-                </td>
-                <td className="px-4 py-3 text-slate-700 dark:text-slate-300">
-                  {document.current_user_name || '-'}
-                </td>
-                <td className="px-4 py-3 text-slate-700 dark:text-slate-300">
-                  {formatDateTime(document.started_at)}
-                </td>
-                <td className="px-4 py-3 text-slate-700 dark:text-slate-300">
-                  {formatDateTime(document.finished_at)}
-                </td>
                 <td className="px-4 py-3 text-slate-700 dark:text-slate-300">
                   {formatDateTime(document.last_sync_at)}
                 </td>
@@ -298,8 +238,8 @@ function DocumentTable({ documents }: { documents: SupervisorDocument[] }) {
             ))}
             {documents.length === 0 && (
               <tr>
-                <td colSpan={20} className="px-4 py-8 text-center text-slate-400 dark:text-slate-500">
-                  Nenhum documento neste grupo.
+                <td colSpan={16} className="px-4 py-8 text-center text-slate-400 dark:text-slate-500">
+                  Nenhum documento encontrado.
                 </td>
               </tr>
             )}

@@ -1,13 +1,19 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
-import { ArrowLeft, CheckCircle2, Clipboard, Package, Truck, Warehouse } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, Clipboard, Package, Tags, Truck, Warehouse } from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { useApp } from '../context/AppContext';
 import { ApiDocument, apiRequest } from '../services/api';
 
-type OperationType = 'Descarga' | 'Conferência' | 'Armazenagem' | 'Separação' | 'Expedição';
+type OperationType =
+  | 'Descarga'
+  | 'Conferência'
+  | 'Armazenagem'
+  | 'Separação'
+  | 'Etiquetagem'
+  | 'Expedição';
 
 const operationTypes: Array<{
   id: OperationType;
@@ -18,6 +24,7 @@ const operationTypes: Array<{
   { id: 'Conferência', name: 'Conferência', documentType: 'NF Entrada' },
   { id: 'Armazenagem', name: 'Armazenagem', documentType: 'NF Entrada' },
   { id: 'Separação', name: 'Separação', documentType: 'Pedido Venda' },
+  { id: 'Etiquetagem', name: 'Etiquetagem', documentType: 'Pedido Venda' },
   { id: 'Expedição', name: 'Expedição', documentType: 'Pedido Venda' },
 ];
 
@@ -26,6 +33,7 @@ const iconMap: Record<OperationType, typeof Package> = {
   Conferência: CheckCircle2,
   Armazenagem: Warehouse,
   Separação: Clipboard,
+  Etiquetagem: Tags,
   Expedição: Truck,
 };
 
@@ -67,7 +75,7 @@ export default function NovaOperacao() {
     setError('');
 
     try {
-      await startProcess(selectedDocument.id);
+      await startProcess(selectedDocument);
       navigate('/confirmacao');
     } catch (error) {
       setError(error instanceof Error ? error.message : 'Nao foi possivel iniciar o processo.');
@@ -99,7 +107,7 @@ export default function NovaOperacao() {
           <p className="text-gray-500 dark:text-gray-400">Escolha a atividade que você irá realizar</p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-6 gap-4 mb-8">
           {operationTypes.map((operation) => {
             const Icon = iconMap[operation.id];
             const isSelected = selectedOperation === operation.id;
@@ -114,7 +122,7 @@ export default function NovaOperacao() {
                 className={`p-6 rounded-2xl transition-all ${
                   isSelected
                     ? 'bg-blue-600 dark:bg-blue-500 text-white shadow-xl scale-105 ring-4 ring-blue-200 dark:ring-blue-700'
-                    : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:shadow-lg hover:scale-102'
+                    : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:shadow-lg'
                 }`}
               >
                 <div className="flex flex-col items-center gap-3">
@@ -151,7 +159,7 @@ export default function NovaOperacao() {
 
             {!isLoadingDocuments && documents.length === 0 && (
               <div className="bg-white dark:bg-slate-800 rounded-2xl p-8 text-center text-slate-500 dark:text-slate-300 mb-8">
-                Nenhum documento disponível para esta operação.
+                Nenhum documento encontrado para esta operação.
               </div>
             )}
 
@@ -221,3 +229,4 @@ export default function NovaOperacao() {
     </div>
   );
 }
+

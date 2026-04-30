@@ -1,10 +1,10 @@
-import { BarChart3, Edit3, Plus, Trash2, UserCog } from 'lucide-react';
+import { Edit3, Plus, Send, Trash2 } from 'lucide-react';
 import { FormEvent, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { ApiUser, apiRequest } from '../../services/api';
 import { formatDateTime } from './format';
 
-type ModalMode = 'create' | 'name' | 'position' | null;
+type ModalMode = 'create' | 'edit' | null;
 
 export default function SupervisorUsers() {
   const navigate = useNavigate();
@@ -15,6 +15,7 @@ export default function SupervisorUsers() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('123456');
   const [position, setPosition] = useState<'SEPARADOR' | 'SUPERVISOR'>('SEPARADOR');
+  const [isActive, setIsActive] = useState(true);
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
@@ -33,22 +34,20 @@ export default function SupervisorUsers() {
     setUsername('');
     setPassword('123456');
     setPosition('SEPARADOR');
+    setIsActive(true);
     setError('');
     setModalMode('create');
   };
 
-  const openNameEdit = (user: ApiUser) => {
+  const openEdit = (user: ApiUser) => {
     setSelectedUser(user);
     setName(user.name);
-    setError('');
-    setModalMode('name');
-  };
-
-  const openPositionEdit = (user: ApiUser) => {
-    setSelectedUser(user);
+    setUsername(user.username);
+    setPassword('');
     setPosition(user.position);
+    setIsActive(user.is_active);
     setError('');
-    setModalMode('position');
+    setModalMode('edit');
   };
 
   const closeModal = () => {
@@ -70,17 +69,16 @@ export default function SupervisorUsers() {
         });
       }
 
-      if (modalMode === 'name' && selectedUser) {
-        await apiRequest(`/api/supervisor/users/${selectedUser.id}/name`, {
+      if (modalMode === 'edit' && selectedUser) {
+        await apiRequest(`/api/supervisor/users/${selectedUser.id}`, {
           method: 'PUT',
-          body: JSON.stringify({ name }),
-        });
-      }
-
-      if (modalMode === 'position' && selectedUser) {
-        await apiRequest(`/api/supervisor/users/${selectedUser.id}/position`, {
-          method: 'PUT',
-          body: JSON.stringify({ position }),
+          body: JSON.stringify({
+            name,
+            username,
+            password,
+            position,
+            is_active: isActive,
+          }),
         });
       }
 
@@ -168,19 +166,21 @@ export default function SupervisorUsers() {
                     <td className="px-4 py-3">
                       <div className="flex flex-wrap gap-2">
                         <button
-                          onClick={() => openNameEdit(user)}
+                          onClick={() => openEdit(user)}
                           className="inline-flex items-center gap-1 px-3 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 dark:bg-slate-700 dark:hover:bg-slate-600 dark:text-slate-100 text-sm"
                         >
                           <Edit3 className="w-4 h-4" />
-                          Editar nome
+                          Editar
                         </button>
-                        <button
-                          onClick={() => openPositionEdit(user)}
-                          className="inline-flex items-center gap-1 px-3 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 dark:bg-slate-700 dark:hover:bg-slate-600 dark:text-slate-100 text-sm"
-                        >
-                          <UserCog className="w-4 h-4" />
-                          Editar cargo
-                        </button>
+                        {user.position === 'SEPARADOR' && (
+                          <button
+                            onClick={() => navigate(`/supervisor/delegar?separadorId=${user.id}`)}
+                            className="inline-flex items-center gap-1 px-3 py-2 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:hover:bg-blue-500/30 dark:text-blue-200 text-sm"
+                          >
+                            <Send className="w-4 h-4" />
+                            Delegar
+                          </button>
+                        )}
                         <button
                           onClick={() => handleDelete(user)}
                           className="inline-flex items-center gap-1 px-3 py-2 rounded-lg bg-red-50 hover:bg-red-100 text-red-700 dark:bg-red-500/20 dark:hover:bg-red-500/30 dark:text-red-200 text-sm"
@@ -188,15 +188,6 @@ export default function SupervisorUsers() {
                           <Trash2 className="w-4 h-4" />
                           Excluir
                         </button>
-                        {user.position === 'SEPARADOR' && (
-                          <button
-                            onClick={() => navigate(`/supervisor/users/${user.id}/performance`)}
-                            className="inline-flex items-center gap-1 px-3 py-2 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:hover:bg-blue-500/30 dark:text-blue-200 text-sm"
-                          >
-                            <BarChart3 className="w-4 h-4" />
-                            Dados
-                          </button>
-                        )}
                       </div>
                     </td>
                   </tr>
@@ -214,9 +205,7 @@ export default function SupervisorUsers() {
             className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl p-6 w-full max-w-md border border-slate-200 dark:border-slate-700"
           >
             <h3 className="text-lg text-slate-900 dark:text-white mb-4">
-              {modalMode === 'create' && 'Criar usuario'}
-              {modalMode === 'name' && 'Editar nome'}
-              {modalMode === 'position' && 'Editar cargo'}
+              {modalMode === 'create' ? 'Criar usuario' : 'Editar usuario'}
             </h3>
 
             {error && (
@@ -225,52 +214,60 @@ export default function SupervisorUsers() {
               </div>
             )}
 
-            {(modalMode === 'create' || modalMode === 'name') && (
-              <label className="block mb-4">
-                <span className="block text-sm text-slate-600 dark:text-slate-300 mb-2">Nome</span>
+            <label className="block mb-4">
+              <span className="block text-sm text-slate-600 dark:text-slate-300 mb-2">Nome</span>
+              <input
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                className="w-full px-4 py-3 rounded-xl border border-slate-300 dark:border-slate-600 dark:bg-slate-900 dark:text-white"
+                required
+              />
+            </label>
+
+            <label className="block mb-4">
+              <span className="block text-sm text-slate-600 dark:text-slate-300 mb-2">Username</span>
+              <input
+                value={username}
+                onChange={(event) => setUsername(event.target.value)}
+                className="w-full px-4 py-3 rounded-xl border border-slate-300 dark:border-slate-600 dark:bg-slate-900 dark:text-white"
+                required
+              />
+            </label>
+
+            <label className="block mb-4">
+              <span className="block text-sm text-slate-600 dark:text-slate-300 mb-2">
+                {modalMode === 'create' ? 'Senha' : 'Nova senha'}
+              </span>
+              <input
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                placeholder={modalMode === 'edit' ? 'Deixe em branco para manter a senha atual' : undefined}
+                className="w-full px-4 py-3 rounded-xl border border-slate-300 dark:border-slate-600 dark:bg-slate-900 dark:text-white"
+                required={modalMode === 'create'}
+              />
+            </label>
+
+            <label className="block mb-4">
+              <span className="block text-sm text-slate-600 dark:text-slate-300 mb-2">Cargo</span>
+              <select
+                value={position}
+                onChange={(event) => setPosition(event.target.value as 'SEPARADOR' | 'SUPERVISOR')}
+                className="w-full px-4 py-3 rounded-xl border border-slate-300 dark:border-slate-600 dark:bg-slate-900 dark:text-white"
+              >
+                <option value="SEPARADOR">SEPARADOR</option>
+                <option value="SUPERVISOR">SUPERVISOR</option>
+              </select>
+            </label>
+
+            {modalMode === 'edit' && (
+              <label className="flex items-center gap-3 mb-5 text-slate-700 dark:text-slate-200">
                 <input
-                  value={name}
-                  onChange={(event) => setName(event.target.value)}
-                  className="w-full px-4 py-3 rounded-xl border border-slate-300 dark:border-slate-600 dark:bg-slate-900 dark:text-white"
-                  required
+                  type="checkbox"
+                  checked={isActive}
+                  onChange={(event) => setIsActive(event.target.checked)}
+                  className="h-5 w-5 rounded border-slate-300"
                 />
-              </label>
-            )}
-
-            {modalMode === 'create' && (
-              <>
-                <label className="block mb-4">
-                  <span className="block text-sm text-slate-600 dark:text-slate-300 mb-2">Username</span>
-                  <input
-                    value={username}
-                    onChange={(event) => setUsername(event.target.value)}
-                    className="w-full px-4 py-3 rounded-xl border border-slate-300 dark:border-slate-600 dark:bg-slate-900 dark:text-white"
-                    required
-                  />
-                </label>
-                <label className="block mb-4">
-                  <span className="block text-sm text-slate-600 dark:text-slate-300 mb-2">Senha</span>
-                  <input
-                    value={password}
-                    onChange={(event) => setPassword(event.target.value)}
-                    className="w-full px-4 py-3 rounded-xl border border-slate-300 dark:border-slate-600 dark:bg-slate-900 dark:text-white"
-                    required
-                  />
-                </label>
-              </>
-            )}
-
-            {(modalMode === 'create' || modalMode === 'position') && (
-              <label className="block mb-5">
-                <span className="block text-sm text-slate-600 dark:text-slate-300 mb-2">Cargo</span>
-                <select
-                  value={position}
-                  onChange={(event) => setPosition(event.target.value as 'SEPARADOR' | 'SUPERVISOR')}
-                  className="w-full px-4 py-3 rounded-xl border border-slate-300 dark:border-slate-600 dark:bg-slate-900 dark:text-white"
-                >
-                  <option value="SEPARADOR">SEPARADOR</option>
-                  <option value="SUPERVISOR">SUPERVISOR</option>
-                </select>
+                Usuario ativo
               </label>
             )}
 
@@ -296,3 +293,4 @@ export default function SupervisorUsers() {
     </div>
   );
 }
+

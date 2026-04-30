@@ -23,6 +23,16 @@ export default function Home() {
     return () => window.clearInterval(interval);
   }, [refreshProcesses]);
 
+  useEffect(() => {
+    if (!activeProcess?.delegatedByName || user?.position !== 'SEPARADOR') return;
+
+    const storageKey = `qlog_delegated_confirmation_${activeProcess.id}`;
+    if (sessionStorage.getItem(storageKey)) return;
+
+    sessionStorage.setItem(storageKey, '1');
+    navigate('/confirmacao?delegado=1', { replace: true });
+  }, [activeProcess, navigate, user?.position]);
+
   const completedProcesses = processes.filter((p) => p.status === 'Concluído');
   const todayProcesses = processes.filter(
     (p) => format(p.startDate, 'yyyy-MM-dd') === format(new Date(), 'yyyy-MM-dd')
@@ -53,7 +63,7 @@ export default function Home() {
     setActionError('');
 
     try {
-      await endProcess(activeProcess.id);
+      await endProcess();
     } catch (error) {
       setActionError(error instanceof Error ? error.message : 'Nao foi possivel encerrar o processo.');
     }
