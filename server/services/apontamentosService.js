@@ -24,6 +24,7 @@ export function createApontamentosService(apontamentosRepository) {
       userId: apontamento.user_id,
       delegatedByUserId: apontamento.delegated_by_user_id,
       delegatedByName: apontamento.delegated_by_user_name,
+      elapsedMinutes: apontamento.time_spent_minutes,
     };
   }
 
@@ -69,6 +70,19 @@ export function createApontamentosService(apontamentosRepository) {
     return apontamentosRepository.closeApontamento(openApontamento.id);
   }
 
+  async function cancelBySupervisor({ apontamentoId, supervisorUserId }) {
+    const apontamento = await apontamentosRepository.cancelApontamentoDocument({
+      apontamentoId,
+      supervisorUserId,
+    });
+
+    if (!apontamento) {
+      throw new BusinessError('Processo em andamento nao encontrado para cancelamento.', 404);
+    }
+
+    return apontamento;
+  }
+
   function listOpen(userId) {
     return apontamentosRepository.listOpenByUser(userId);
   }
@@ -81,8 +95,8 @@ export function createApontamentosService(apontamentosRepository) {
     toProcess,
     start,
     closeOpenByUser,
+    cancelBySupervisor,
     listOpen,
     listHistory,
   };
 }
-

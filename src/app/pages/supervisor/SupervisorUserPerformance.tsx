@@ -1,10 +1,9 @@
 import { AlertCircle, Box, Clock, FileCheck2, Package, PauseCircle, XCircle } from 'lucide-react';
-import { formatDistanceToNow } from 'date-fns';
-import { ptBR } from 'date-fns/locale';
 import type { ReactNode } from 'react';
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router';
 import { ApiUser, apiRequest } from '../../services/api';
+import { elapsedMinutesSinceApiLocal, formatElapsedMinutes, normalizeElapsedMinutes } from '../../utils/dates';
 import { SupervisorDocument } from './SupervisorDocuments';
 import { formatDateTime, formatMinutes, statusClass, statusLabel } from './format';
 
@@ -27,6 +26,8 @@ export default function SupervisorUserPerformance() {
   const [error, setError] = useState('');
   const [actionError, setActionError] = useState('');
   const [isClosingProcess, setIsClosingProcess] = useState(false);
+  const [isCancelingProcess, setIsCancelingProcess] = useState(false);
+  const [now, setNow] = useState(() => new Date());
 
   const loadPerformance = async () => {
     if (!id) return;
@@ -44,12 +45,25 @@ export default function SupervisorUserPerformance() {
     loadPerformance();
   }, [id]);
 
+  useEffect(() => {
+    if (!data?.documents.some((document) => document.status === 'DOING' && !document.finished_at)) {
+      return undefined;
+    }
+
+    setNow(new Date());
+    const interval = window.setInterval(() => setNow(new Date()), 30_000);
+
+    return () => window.clearInterval(interval);
+  }, [data]);
+
   const activeDocument =
     data?.documents.find((document) => document.status === 'DOING' && !document.finished_at) || null;
 
-  const elapsedLabel = activeDocument?.started_at
-    ? formatDistanceToNow(new Date(activeDocument.started_at), { locale: ptBR, addSuffix: true })
-    : '-';
+  const activeElapsedMinutes = activeDocument
+    ? elapsedMinutesSinceApiLocal(activeDocument.started_at, now) ??
+      normalizeElapsedMinutes(activeDocument.time_spent_minutes)
+    : null;
+  const elapsedLabel = formatElapsedMinutes(activeElapsedMinutes);
 
   const handleCloseOpenProcess = async () => {
     if (!id || !activeDocument) return;
@@ -66,6 +80,27 @@ export default function SupervisorUserPerformance() {
       setActionError(error instanceof Error ? error.message : 'Nao foi possivel encerrar o processo.');
     } finally {
       setIsClosingProcess(false);
+    }
+  };
+
+  const handleCancelProcess = async () => {
+    if (!activeDocument) return;
+
+    const confirmed = window.confirm('Tem certeza que deseja cancelar este processo no QLOG?');
+    if (!confirmed) return;
+
+    setActionError('');
+    setIsCancelingProcess(true);
+
+    try {
+      await apiRequest(`/api/supervisor/apontamentos/${activeDocument.id}/cancel`, {
+        method: 'POST',
+      });
+      await loadPerformance();
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Nao foi possivel cancelar o processo no QLOG.');
+    } finally {
+      setIsCancelingProcess(false);
     }
   };
 
@@ -134,13 +169,22 @@ export default function SupervisorUserPerformance() {
                       </div>
                     </div>
 
-                    <button
-                      onClick={handleCloseOpenProcess}
-                      disabled={isClosingProcess}
-                      className="bg-red-600 hover:bg-red-700 disabled:bg-red-300 dark:bg-red-500/90 dark:hover:bg-red-500 dark:disabled:bg-red-500/50 text-white px-6 py-3 rounded-xl transition-colors shadow-sm"
-                    >
-                      {isClosingProcess ? 'Encerrando...' : 'Encerrar Processo'}
-                    </button>
+                    <div className="flex flex-wrap gap-3">
+                      <button
+                        onClick={handleCloseOpenProcess}
+                        disabled={isClosingProcess || isCancelingProcess}
+                        className="bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-300 dark:bg-emerald-500/90 dark:hover:bg-emerald-500 dark:disabled:bg-emerald-500/50 text-white px-6 py-3 rounded-xl transition-colors shadow-sm"
+                      >
+                        Finalizar processo
+                      </button>
+                      <button
+                        onClick={handleCancelProcess}
+                        disabled={isClosingProcess || isCancelingProcess}
+                        className="bg-red-600 hover:bg-red-700 disabled:bg-red-300 dark:bg-red-500/90 dark:hover:bg-red-500 dark:disabled:bg-red-500/50 text-white px-6 py-3 rounded-xl transition-colors shadow-sm"
+                      >
+                        Cancelar processo
+                      </button>
+                    </div>
                   </div>
                 </div>
               </section>

@@ -7,6 +7,7 @@ import { DocumentsPagination } from '../components/DocumentsPagination';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { useApp } from '../context/AppContext';
 import { ApiDocument, ApiDocumentsResponse, ApiPagination, apiRequest } from '../services/api';
+import { parseApiDate } from '../utils/dates';
 
 type OperationType =
   | 'Descarga'
@@ -247,7 +248,7 @@ export default function NovaOperacao() {
                           <p className={`text-sm ${labelClass}`}>Data</p>
                           <p className={valueClass}>
                             {doc.document_date
-                              ? format(new Date(doc.document_date), 'dd/MM', { locale: ptBR })
+                              ? format(parseApiDate(doc.document_date) || new Date(doc.document_date), 'dd/MM', { locale: ptBR })
                               : '-'}
                           </p>
                         </div>

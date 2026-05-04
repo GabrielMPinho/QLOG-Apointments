@@ -1,4 +1,4 @@
-import { db, isSqlServer, sql, sqlQuery } from '../lib/database.js';
+import { db, hasColumn, isSqlServer, sql, sqlQuery } from '../lib/database.js';
 import { shouldUseStatusProtheusFilter } from '../lib/documentStatusProtheus.js';
 import {
   normalizeOperationCode,
@@ -7,15 +7,15 @@ import {
   operationLabel,
 } from '../lib/operations.js';
 
-function minutesBetween(startedAt, finishedAt) {
-  if (!startedAt || !finishedAt) return null;
+function minutesBetween(startedAt, finishedAt = null) {
+  if (!startedAt) return null;
 
   const start = new Date(startedAt).getTime();
-  const end = new Date(finishedAt).getTime();
+  const end = finishedAt ? new Date(finishedAt).getTime() : Date.now();
 
   if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return null;
 
-  return Math.round((end - start) / 60_000);
+  return Math.floor((end - start) / 60_000);
 }
 
 export function mapApontamento(row) {
@@ -27,6 +27,10 @@ export function mapApontamento(row) {
     '';
   const dataInicio = row.data_inicio || row.data_hora_inicio;
   const dataFim = row.data_fim || row.data_hora_fim || null;
+  const elapsedMinutes =
+    row.elapsed_minutes !== undefined && row.elapsed_minutes !== null
+      ? Number(row.elapsed_minutes)
+      : minutesBetween(dataInicio, dataFim);
 
   return {
     id: String(row.id),
@@ -55,7 +59,7 @@ export function mapApontamento(row) {
       gross_weight: Number(row.gross_weight || row.peso_bruto || 0),
       net_weight: Number(row.net_weight || row.peso_liquido || 0),
     },
-    time_spent_minutes: minutesBetween(dataInicio, dataFim),
+    time_spent_minutes: Number.isFinite(elapsedMinutes) ? elapsedMinutes : minutesBetween(dataInicio, dataFim),
     created_at: row.created_at || row.criado || null,
     updated_at: row.updated_at || row.atualizado || null,
   };
@@ -90,12 +94,13 @@ const sqlServerSelectApontamentosSql = `
     a.documento_id,
     a.usuario_id,
     a.tipo_operacao_id,
-    a.data_hora_inicio,
-    a.data_hora_fim,
+    convert(varchar(19), a.data_hora_inicio, 126) as data_hora_inicio,
+    convert(varchar(19), a.data_hora_fim, 126) as data_hora_fim,
+    datediff(minute, a.data_hora_inicio, coalesce(a.data_hora_fim, getdate())) as elapsed_minutes,
     a.volumes,
     a.skus,
-    a.criado,
-    a.atualizado,
+    convert(varchar(19), a.criado, 126) as criado,
+    convert(varchar(19), a.atualizado, 126) as atualizado,
     u.nome as nome_usuario,
     u.login,
     d.tabela_origem,
@@ -104,7 +109,7 @@ const sqlServerSelectApontamentosSql = `
     d.nome_parceiro,
     d.codigo_parceiro,
     d.loja_parceiro,
-    d.data_documento,
+    convert(varchar(10), d.data_documento, 23) as data_documento,
     d.peso_bruto,
     d.peso_liquido,
     try_convert(int, json_value(ev.metadados, '$.delegated_by_user_id')) as delegated_by_user_id,
@@ -118,6 +123,7 @@ const sqlServerSelectApontamentosSql = `
     from dbo.tb_qlog_eventos_documento e
     where e.apontamento_id = a.id
       and e.metadados is not null
+      and json_value(e.metadados, '$.delegated_by_user_id') is not null
     order by e.data_hora_evento desc
   ) ev
   left join dbo.tb_qlog_usuarios delegator
@@ -135,6 +141,125 @@ async function findById(id) {
   }
 
   return mapApontamento(db.prepare(`${sqliteSelectApontamentosSql} where a.id = ?`).get(id));
+}
+
+async function insertSqlServerDocumentEvent({
+  documentoId,
+  apontamentoId,
+  usuarioId,
+  tipoEventoId,
+  statusAntigo = null,
+  statusNovo = null,
+  metadata,
+}) {
+  await sqlQuery(
+    `
+      insert into dbo.tb_qlog_eventos_documento (
+        documento_id,
+        apontamento_id,
+        usuario_id,
+        tipo_evento_id,
+        status_antigo,
+        status_novo,
+        data_hora_evento,
+        metadados
+      )
+      values (
+        @documentoId,
+        @apontamentoId,
+        @usuarioId,
+        @tipoEventoId,
+        @statusAntigo,
+        @statusNovo,
+        getdate(),
+        @metadata
+      )
+    `,
+    {
+      documentoId: { type: sql.Int, value: Number(documentoId) },
+      apontamentoId: { type: sql.Int, value: apontamentoId ? Number(apontamentoId) : null },
+      usuarioId: { type: sql.Int, value: usuarioId ? Number(usuarioId) : null },
+      tipoEventoId: { type: sql.Int, value: Number(tipoEventoId) },
+      statusAntigo: { type: sql.NVarChar(100), value: statusAntigo },
+      statusNovo: { type: sql.NVarChar(100), value: statusNovo },
+      metadata: {
+        type: sql.NVarChar(sql.MAX),
+        value: JSON.stringify(metadata),
+      },
+    }
+  );
+}
+
+function insertSqliteDocumentEvent({
+  documentoId,
+  usuarioId,
+  tipoEventoId,
+  statusAntigo = null,
+  statusNovo = null,
+  metadata,
+}) {
+  db
+    .prepare(`
+      insert into document_events (document_id, user_id, event_type, old_status, new_status, event_at, metadata)
+      values (?, ?, ?, ?, ?, current_timestamp, ?)
+    `)
+    .run(
+      documentoId,
+      usuarioId,
+      String(tipoEventoId),
+      statusAntigo,
+      statusNovo,
+      JSON.stringify(metadata)
+    );
+}
+
+async function getSqlServerDocumentStatus(documentoId) {
+  const result = await sqlQuery(
+    `
+      select top 1 status
+      from DADOS_BI.dbo.tb_qlog_documentos
+      where id = @documentoId
+    `,
+    { documentoId: { type: sql.Int, value: Number(documentoId) } }
+  );
+
+  return result.recordset[0]?.status ?? null;
+}
+
+async function updateSqlServerDocumentStatus(documentoId, status) {
+  await sqlQuery(
+    `
+      update DADOS_BI.dbo.tb_qlog_documentos
+      set status = @status,
+          atualizado = getdate()
+      where id = @documentoId
+    `,
+    {
+      documentoId: { type: sql.Int, value: Number(documentoId) },
+      status: { type: sql.NVarChar(100), value: status },
+    }
+  );
+}
+
+function getSqliteDocumentByAppointment(apontamento) {
+  const statusSelect = hasColumn('documents', 'status') ? 'status' : 'null as status';
+
+  return db
+    .prepare(`select id, ${statusSelect} from documents where document_number = ? order by id desc limit 1`)
+    .get(apontamento.numero_documento);
+}
+
+function updateSqliteDocumentStatus(documentoId, status) {
+  if (!hasColumn('documents', 'status')) return;
+
+  db
+    .prepare(`
+      update documents
+      set status = ?,
+          updated_at = current_timestamp
+      where id = ?
+    `)
+    .run(status, documentoId);
 }
 
 export async function findOpenByUser(userId) {
@@ -324,6 +449,16 @@ export async function createApontamento({
             where completed.documento_id = d.id
               and completed.tipo_operacao_id = @operationId
               and completed.data_hora_fim is not null
+              and not exists (
+                select 1
+                from dbo.tb_qlog_eventos_documento cancel_event
+                where cancel_event.apontamento_id = completed.id
+                  and cancel_event.tipo_evento_id = 3
+                  and (
+                    json_value(cancel_event.metadados, '$.acao') = 'processo_cancelado'
+                    or json_value(cancel_event.metadados, '$.evento') = 'APONTAMENTO_CANCELADO'
+                  )
+              )
           )
           and (
             (@documentId is not null and d.id = @documentId)
@@ -337,43 +472,40 @@ export async function createApontamento({
     const insertedId = result.recordset[0]?.id;
     if (!insertedId) return null;
 
-    if (delegatedByUserId) {
-      await sqlQuery(
-        `
-          insert into dbo.tb_qlog_eventos_documento (
-            documento_id,
-            apontamento_id,
-            usuario_id,
-            tipo_evento_id,
-            status_antigo,
-            status_novo,
-            data_hora_evento,
-            metadados
-          )
-          select
-            documento_id,
-            id,
-            @delegatedByUserId,
-            1,
-            null,
-            null,
-            getdate(),
-            @metadata
-          from DADOS_BI.dbo.tb_qlog_apontamentos
-          where id = @insertedId
-        `,
-        {
-          insertedId: { type: sql.Int, value: Number(insertedId) },
-          delegatedByUserId: { type: sql.Int, value: Number(delegatedByUserId) },
-          metadata: {
-            type: sql.NVarChar(sql.MAX),
-            value: JSON.stringify({ delegated_by_user_id: Number(delegatedByUserId) }),
-          },
-        }
-      );
-    }
+    const apontamento = await findById(insertedId);
+    const statusAntigo = await getSqlServerDocumentStatus(apontamento.documento_id);
+    await updateSqlServerDocumentStatus(apontamento.documento_id, 'INDISPONIVEL');
 
-    return findById(insertedId);
+    await insertSqlServerDocumentEvent({
+      documentoId: apontamento.documento_id,
+      apontamentoId: apontamento.id,
+      usuarioId: apontamento.user_id,
+      tipoEventoId: 1,
+      metadata: {
+        acao: 'processo_iniciado',
+        evento: 'APONTAMENTO_INICIADO',
+        tipo_operacao_id: opId,
+        ...(delegatedByUserId ? { delegated_by_user_id: Number(delegatedByUserId) } : {}),
+      },
+    });
+
+    await insertSqlServerDocumentEvent({
+      documentoId: apontamento.documento_id,
+      apontamentoId: apontamento.id,
+      usuarioId: apontamento.user_id,
+      tipoEventoId: 1,
+      statusAntigo,
+      statusNovo: 'INICIADO',
+      metadata: {
+        acao: 'status_alterado',
+        evento: 'STATUS_ALTERADO',
+        status_operacional_novo: 'INICIADO',
+        status_documento_antigo: statusAntigo,
+        status_documento_novo: 'INDISPONIVEL',
+      },
+    });
+
+    return apontamento;
   }
 
   const result = db
@@ -383,11 +515,53 @@ export async function createApontamento({
     `)
     .run(userId, delegatedByUserId, tipoOperacao, numeroDocumento);
 
+  const document = documentoId
+    ? { id: documentoId }
+    : db.prepare('select id from documents where document_number = ? order by id desc limit 1').get(numeroDocumento);
+
+  if (document?.id) {
+    const statusAntigo = hasColumn('documents', 'status')
+      ? db.prepare('select status from documents where id = ?').get(document.id)?.status ?? null
+      : null;
+    updateSqliteDocumentStatus(document.id, 'INDISPONIVEL');
+
+    insertSqliteDocumentEvent({
+      documentoId: document.id,
+      usuarioId: userId,
+      tipoEventoId: 1,
+      metadata: {
+        acao: 'processo_iniciado',
+        evento: 'APONTAMENTO_INICIADO',
+        tipo_operacao_id: operationId(tipoOperacao),
+        ...(delegatedByUserId ? { delegated_by_user_id: Number(delegatedByUserId) } : {}),
+      },
+    });
+
+    insertSqliteDocumentEvent({
+      documentoId: document.id,
+      usuarioId: userId,
+      tipoEventoId: 1,
+      statusAntigo,
+      statusNovo: 'INICIADO',
+      metadata: {
+        acao: 'status_alterado',
+        evento: 'STATUS_ALTERADO',
+        status_operacional_novo: 'INICIADO',
+        status_documento_antigo: statusAntigo,
+        status_documento_novo: 'INDISPONIVEL',
+      },
+    });
+  }
+
   return findById(result.lastInsertRowid);
 }
 
 export async function closeApontamento(id) {
   if (isSqlServer) {
+    const apontamento = await findById(id);
+    if (!apontamento) return null;
+    const statusAntigo = await getSqlServerDocumentStatus(apontamento.documento_id);
+
     await sqlQuery(
       `
         update DADOS_BI.dbo.tb_qlog_apontamentos
@@ -399,8 +573,37 @@ export async function closeApontamento(id) {
       { id: { type: sql.Int, value: Number(id) } }
     );
 
+    await updateSqlServerDocumentStatus(apontamento.documento_id, 'INDISPONIVEL');
+
+    await insertSqlServerDocumentEvent({
+      documentoId: apontamento.documento_id,
+      apontamentoId: apontamento.id,
+      usuarioId: apontamento.user_id,
+      tipoEventoId: 2,
+      metadata: { acao: 'processo_finalizado', evento: 'APONTAMENTO_FINALIZADO' },
+    });
+
+    await insertSqlServerDocumentEvent({
+      documentoId: apontamento.documento_id,
+      apontamentoId: apontamento.id,
+      usuarioId: apontamento.user_id,
+      tipoEventoId: 2,
+      statusAntigo,
+      statusNovo: 'FINALIZADO',
+      metadata: {
+        acao: 'status_alterado',
+        evento: 'STATUS_ALTERADO',
+        status_operacional_novo: 'FINALIZADO',
+        status_documento_antigo: statusAntigo,
+        status_documento_novo: 'INDISPONIVEL',
+      },
+    });
+
     return findById(id);
   }
+
+  const apontamento = await findById(id);
+  if (!apontamento) return null;
 
   db
     .prepare(`
@@ -411,5 +614,122 @@ export async function closeApontamento(id) {
     `)
     .run(id);
 
+  const document = getSqliteDocumentByAppointment(apontamento);
+
+  if (document?.id) {
+    updateSqliteDocumentStatus(document.id, 'INDISPONIVEL');
+
+    insertSqliteDocumentEvent({
+      documentoId: document.id,
+      usuarioId: apontamento.user_id,
+      tipoEventoId: 2,
+      metadata: { acao: 'processo_finalizado', evento: 'APONTAMENTO_FINALIZADO' },
+    });
+
+    insertSqliteDocumentEvent({
+      documentoId: document.id,
+      usuarioId: apontamento.user_id,
+      tipoEventoId: 2,
+      statusAntigo: document.status ?? null,
+      statusNovo: 'FINALIZADO',
+      metadata: {
+        acao: 'status_alterado',
+        evento: 'STATUS_ALTERADO',
+        status_operacional_novo: 'FINALIZADO',
+        status_documento_antigo: document.status ?? null,
+        status_documento_novo: 'INDISPONIVEL',
+      },
+    });
+  }
+
   return findById(id);
+}
+
+export async function cancelApontamentoDocument({ apontamentoId, supervisorUserId }) {
+  const apontamento = await findById(apontamentoId);
+  if (!apontamento) return null;
+
+  if (isSqlServer) {
+    if (!apontamento.documento_id) return null;
+
+    const statusAntigo = await getSqlServerDocumentStatus(apontamento.documento_id);
+    await updateSqlServerDocumentStatus(apontamento.documento_id, 'DISPONIVEL');
+
+    await sqlQuery(
+      `
+        update DADOS_BI.dbo.tb_qlog_apontamentos
+        set data_hora_fim = coalesce(data_hora_fim, getdate()),
+            atualizado = getdate()
+        where id = @id
+      `,
+      { id: { type: sql.Int, value: Number(apontamento.id) } }
+    );
+
+    await insertSqlServerDocumentEvent({
+      documentoId: apontamento.documento_id,
+      apontamentoId: apontamento.id,
+      usuarioId: supervisorUserId,
+      tipoEventoId: 3,
+      metadata: { acao: 'processo_cancelado', evento: 'APONTAMENTO_CANCELADO', origem: 'tela_supervisor' },
+    });
+
+    await insertSqlServerDocumentEvent({
+      documentoId: apontamento.documento_id,
+      apontamentoId: apontamento.id,
+      usuarioId: supervisorUserId,
+      tipoEventoId: 3,
+      statusAntigo,
+      statusNovo: 'CANCELADO',
+      metadata: {
+        acao: 'status_alterado',
+        evento: 'STATUS_ALTERADO',
+        origem: 'tela_supervisor',
+        status_operacional_novo: 'CANCELADO',
+        status_documento_antigo: statusAntigo,
+        status_documento_novo: 'DISPONIVEL',
+      },
+    });
+
+    return findById(apontamento.id);
+  }
+
+  const document = getSqliteDocumentByAppointment(apontamento);
+
+  if (!document?.id) return null;
+
+  updateSqliteDocumentStatus(document.id, 'DISPONIVEL');
+
+  db
+    .prepare(`
+      update apontamentos
+      set data_fim = coalesce(data_fim, current_timestamp),
+          updated_at = current_timestamp
+      where id = ?
+    `)
+    .run(apontamento.id);
+
+  insertSqliteDocumentEvent({
+    documentoId: document.id,
+    usuarioId: supervisorUserId,
+    tipoEventoId: 3,
+    metadata: { acao: 'processo_cancelado', evento: 'APONTAMENTO_CANCELADO', origem: 'tela_supervisor' },
+  });
+
+  insertSqliteDocumentEvent({
+    documentoId: document.id,
+    usuarioId: supervisorUserId,
+    tipoEventoId: 3,
+    statusAntigo: document.status ?? null,
+    statusNovo: 'CANCELADO',
+    metadata: {
+      acao: 'status_alterado',
+      evento: 'STATUS_ALTERADO',
+      origem: 'tela_supervisor',
+      status_operacional_novo: 'CANCELADO',
+      status_documento_antigo: document.status ?? null,
+      status_documento_novo: 'DISPONIVEL',
+    },
+  });
+
+  return findById(apontamento.id);
 }

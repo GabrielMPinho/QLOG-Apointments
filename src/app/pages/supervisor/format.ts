@@ -1,8 +1,10 @@
+import { parseApiDate } from '../../utils/dates';
+
 export function formatDateTime(value?: string | null) {
   if (!value) return '-';
 
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
+  const date = parseApiDate(value);
+  if (!date) return value;
 
   return new Intl.DateTimeFormat('pt-BR', {
     day: '2-digit',
@@ -16,8 +18,8 @@ export function formatDateTime(value?: string | null) {
 export function formatDate(value?: string | null) {
   if (!value) return '-';
 
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
+  const date = parseApiDate(value);
+  if (!date) return value;
 
   return new Intl.DateTimeFormat('pt-BR').format(date);
 }

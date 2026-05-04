@@ -106,6 +106,16 @@ export async function listDocuments(filters = {}) {
           where a.documento_id = d.id
             and a.tipo_operacao_id = @operationId
             and a.data_hora_fim is not null
+            and not exists (
+              select 1
+              from dbo.tb_qlog_eventos_documento cancel_event
+              where cancel_event.apontamento_id = a.id
+                and cancel_event.tipo_evento_id = 3
+                and (
+                  json_value(cancel_event.metadados, '$.acao') = 'processo_cancelado'
+                  or json_value(cancel_event.metadados, '$.evento') = 'APONTAMENTO_CANCELADO'
+                )
+            )
         )
       `);
       parameters.operationId = { type: sql.Int, value: opId };
@@ -176,16 +186,16 @@ export async function listDocuments(filters = {}) {
         codigo_parceiro,
         loja_parceiro,
         nome_parceiro,
-        data_documento,
+        convert(varchar(10), data_documento, 23) as data_documento,
         volumes,
         skus,
         peso_bruto,
         peso_liquido,
         status,
         payload_origem,
-        sincronizado_em,
-        criado,
-        atualizado
+        convert(varchar(19), sincronizado_em, 126) as sincronizado_em,
+        convert(varchar(19), criado, 126) as criado,
+        convert(varchar(19), atualizado, 126) as atualizado
       from DADOS_BI.dbo.tb_qlog_documentos d
       where ${where.join(' and ')}
       order by data_documento desc, id desc

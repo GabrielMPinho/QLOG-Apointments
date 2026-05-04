@@ -359,6 +359,25 @@ app.get('/api/supervisor/apontamentos', requireSupervisor, async (req, res, next
   }
 });
 
+app.post('/api/supervisor/apontamentos/:id/cancel', requireSupervisor, async (req, res) => {
+  try {
+    const apontamento = await apontamentosService.cancelBySupervisor({
+      apontamentoId: req.params.id,
+      supervisorUserId: mapUser(req.user).id,
+    });
+
+    return res.json({
+      sucesso: true,
+      apontamento,
+      process: apontamentosService.toProcess(apontamento),
+    });
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({
+      message: error.message || 'Nao foi possivel cancelar o processo no QLOG.',
+    });
+  }
+});
+
 app.get('/api/supervisor/documents', requireSupervisor, async (req, res, next) => {
   try {
     const { operation, origin, documentNumber, partner, page, perPage, search } = req.query;

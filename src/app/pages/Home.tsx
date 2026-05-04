@@ -2,14 +2,15 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { useApp } from '../context/AppContext';
 import { Plus, Clock, CheckCircle, User, IdCard, TrendingUp, AlertCircle } from 'lucide-react';
-import { formatDistanceToNow, format, differenceInMinutes } from 'date-fns';
-import { ptBR } from 'date-fns/locale';
+import { format, differenceInMinutes } from 'date-fns';
 import { ThemeToggle } from '../components/ThemeToggle';
+import { elapsedMinutesSinceApiLocal, formatElapsedMinutes, normalizeElapsedMinutes } from '../utils/dates';
 
 export default function Home() {
   const navigate = useNavigate();
   const { user, processes, activeProcess, endProcess, refreshProcesses, logout } = useApp();
   const [actionError, setActionError] = useState('');
+  const [now, setNow] = useState(() => new Date());
 
   useEffect(() => {
     refreshProcesses().catch(() => {
@@ -33,10 +34,23 @@ export default function Home() {
     navigate('/confirmacao?delegado=1', { replace: true });
   }, [activeProcess, navigate, user?.position]);
 
+  useEffect(() => {
+    if (!activeProcess) return undefined;
+
+    setNow(new Date());
+    const interval = window.setInterval(() => setNow(new Date()), 30_000);
+
+    return () => window.clearInterval(interval);
+  }, [activeProcess?.id]);
+
   const completedProcesses = processes.filter((p) => p.status === 'Concluído');
   const todayProcesses = processes.filter(
     (p) => format(p.startDate, 'yyyy-MM-dd') === format(new Date(), 'yyyy-MM-dd')
   );
+  const activeElapsedMinutes = activeProcess
+    ? elapsedMinutesSinceApiLocal(activeProcess.startDateRaw, now) ??
+      normalizeElapsedMinutes(activeProcess.elapsedMinutes)
+    : null;
 
   const totalTimeToday = todayProcesses.reduce((total, p) => {
     if (p.endDate) {
@@ -174,16 +188,16 @@ export default function Home() {
                     <div>
                       <p className="text-sm text-slate-500 dark:text-slate-400">Tempo Decorrido</p>
                       <p className="text-slate-900 dark:text-slate-100">
-                        {formatDistanceToNow(activeProcess.startDate, { locale: ptBR, addSuffix: true })}
+                        {formatElapsedMinutes(activeElapsedMinutes)}
                       </p>
                     </div>
                   </div>
                 </div>
                 <button
                   onClick={handleEndProcess}
-                  className="bg-red-600 hover:bg-red-700 dark:bg-red-500/90 dark:hover:bg-red-500 text-white px-6 py-3 rounded-xl transition-colors shadow-sm"
+                  className="bg-emerald-600 hover:bg-emerald-700 dark:bg-emerald-500/90 dark:hover:bg-emerald-500 text-white px-6 py-3 rounded-xl transition-colors shadow-sm"
                 >
-                  Encerrar Processo
+                  Finalizar processo
                 </button>
               </div>
             </div>

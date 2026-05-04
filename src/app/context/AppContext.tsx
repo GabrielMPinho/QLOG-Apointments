@@ -7,6 +7,7 @@ import {
   getStoredUser,
   setStoredUser,
 } from '../services/api';
+import { parseRequiredApiDate } from '../utils/dates';
 
 export interface User extends ApiUser {}
 
@@ -16,6 +17,7 @@ export interface Process {
   documentNumber: string;
   documentType: 'NF Entrada' | 'Pedido Venda' | 'Documento';
   client: string;
+  startDateRaw?: string | Date;
   startDate: Date;
   endDate?: Date;
   status: 'Em andamento' | 'Concluído' | 'Cancelado';
@@ -24,6 +26,7 @@ export interface Process {
   userId: string;
   delegatedByUserId?: string | null;
   delegatedByName?: string | null;
+  elapsedMinutes?: number | null;
 }
 
 interface AppContextType {
@@ -35,6 +38,14 @@ interface AppContextType {
   refreshProcesses: () => Promise<void>;
   startProcess: (document: ApiDocument) => Promise<Process | null>;
   endProcess: () => Promise<void>;
+}
+
+interface ProcessesResponse {
+  processes: Process[];
+  apontamentos?: Array<{
+    id: string | number;
+    time_spent_minutes?: number | null;
+  }>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -62,19 +73,37 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const mapProcess = (process: Process): Process => ({
     ...process,
-    startDate: new Date(process.startDate),
-    endDate: process.endDate ? new Date(process.endDate) : undefined,
+    startDateRaw: process.startDateRaw ?? process.startDate,
+    startDate: parseRequiredApiDate(process.startDate),
+    endDate: process.endDate ? parseRequiredApiDate(process.endDate) : undefined,
   });
+
+  const mapProcessesResponse = (data: ProcessesResponse) => {
+    const elapsedByProcessId = new Map(
+      (data.apontamentos || []).map((apontamento) => [
+        String(apontamento.id),
+        apontamento.time_spent_minutes,
+      ])
+    );
+
+    return data.processes.map((process) =>
+      mapProcess({
+        ...process,
+        elapsedMinutes:
+          process.elapsedMinutes ?? elapsedByProcessId.get(String(process.id)) ?? null,
+      })
+    );
+  };
 
   const refreshProcesses = useCallback(async () => {
     if (!user) return;
 
     const [openData, historyData] = await Promise.all([
-      apiRequest<{ processes: Process[] }>('/api/apontamentos/abertos'),
-      apiRequest<{ processes: Process[] }>('/api/apontamentos/historico'),
+      apiRequest<ProcessesResponse>('/api/apontamentos/abertos'),
+      apiRequest<ProcessesResponse>('/api/apontamentos/historico'),
     ]);
 
-    setProcesses([...openData.processes, ...historyData.processes].map(mapProcess));
+    setProcesses([...mapProcessesResponse(openData), ...mapProcessesResponse(historyData)]);
   }, [user]);
 
   const startProcess = async (document: ApiDocument): Promise<Process | null> => {

@@ -5,6 +5,7 @@ import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { DocumentsPagination } from '../../components/DocumentsPagination';
 import { ApiDocument, ApiDocumentsResponse, ApiPagination, ApiUser, apiRequest } from '../../services/api';
+import { parseApiDate } from '../../utils/dates';
 
 type OperationType =
   | 'Descarga'
@@ -279,7 +280,9 @@ export default function SupervisorDelegar() {
                       <div>
                         <p className={`text-sm ${labelClass}`}>Data</p>
                         <p className={valueClass}>
-                          {doc.document_date ? format(new Date(doc.document_date), 'dd/MM', { locale: ptBR }) : '-'}
+                          {doc.document_date
+                            ? format(parseApiDate(doc.document_date) || new Date(doc.document_date), 'dd/MM', { locale: ptBR })
+                            : '-'}
                         </p>
                       </div>
                       <div>

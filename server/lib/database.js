@@ -35,6 +35,7 @@ export function getSqlServerConfig() {
     options: {
       encrypt: booleanEnv(process.env.SQLSERVER_ENCRYPT, false),
       trustServerCertificate: booleanEnv(process.env.SQLSERVER_TRUST_SERVER_CERTIFICATE, true),
+      useUTC: booleanEnv(process.env.SQLSERVER_USE_UTC, false),
     },
     pool: {
       max: 10,

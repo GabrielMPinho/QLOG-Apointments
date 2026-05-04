@@ -1,4 +1,3 @@
-import { BarChart3 } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { useEffect, useMemo, useState } from 'react';
 import { ApiDocument, ApiUser, apiRequest } from '../../services/api';
@@ -25,31 +24,51 @@ export default function SupervisorHome() {
   const [apontamentos, setApontamentos] = useState<SupervisorAppointment[]>([]);
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(true);
+  const [cancelingId, setCancelingId] = useState<string | null>(null);
+
+  const loadOverview = async () => {
+    setIsLoading(true);
+    setError('');
+
+    try {
+      const [usersData, documentsData, apontamentosData] = await Promise.all([
+        apiRequest<{ users: ApiUser[] }>('/api/supervisor/users'),
+        apiRequest<{ documents: ApiDocument[] }>('/api/supervisor/documents'),
+        apiRequest<{ apontamentos: SupervisorAppointment[] }>('/api/supervisor/apontamentos'),
+      ]);
+
+      setUsers(usersData.users);
+      setDocuments(documentsData.documents);
+      setApontamentos(apontamentosData.apontamentos);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Nao foi possivel carregar o overview.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   useEffect(() => {
-    const loadOverview = async () => {
-      setIsLoading(true);
-      setError('');
-
-      try {
-        const [usersData, documentsData, apontamentosData] = await Promise.all([
-          apiRequest<{ users: ApiUser[] }>('/api/supervisor/users'),
-          apiRequest<{ documents: ApiDocument[] }>('/api/supervisor/documents'),
-          apiRequest<{ apontamentos: SupervisorAppointment[] }>('/api/supervisor/apontamentos'),
-        ]);
-
-        setUsers(usersData.users);
-        setDocuments(documentsData.documents);
-        setApontamentos(apontamentosData.apontamentos);
-      } catch (error) {
-        setError(error instanceof Error ? error.message : 'Nao foi possivel carregar o overview.');
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
     loadOverview();
   }, []);
+
+  const handleCancelProcess = async (apontamento: SupervisorAppointment) => {
+    const confirmed = window.confirm('Tem certeza que deseja cancelar este processo no QLOG?');
+    if (!confirmed) return;
+
+    setCancelingId(apontamento.id);
+    setError('');
+
+    try {
+      await apiRequest(`/api/supervisor/apontamentos/${apontamento.id}/cancel`, {
+        method: 'POST',
+      });
+      await loadOverview();
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Nao foi possivel cancelar o processo no QLOG.');
+    } finally {
+      setCancelingId(null);
+    }
+  };
 
   const operationCounts = useMemo(() => {
     const counts = apontamentos.reduce<Record<string, number>>((acc, item) => {
@@ -89,9 +108,9 @@ export default function SupervisorHome() {
       <div className="flex items-start justify-between mb-6">
         <div>
           <p className="text-sm text-blue-600 dark:text-blue-300 mb-1">Overview</p>
-          <h2 className="text-2xl text-slate-900 dark:text-white">Situação geral da empresa</h2>
+          <h2 className="text-2xl text-slate-900 dark:text-white">Situacao geral da empresa</h2>
           <p className="text-slate-500 dark:text-slate-400">
-            Documentos são referência; execução operacional é controlada por apontamentos.
+            Documentos sao referencia; execucao operacional e controlada por apontamentos.
           </p>
         </div>
       </div>
@@ -113,13 +132,13 @@ export default function SupervisorHome() {
             <MetricCard label="Apontamentos" value={apontamentos.length} />
             <MetricCard label="Em aberto" value={openAppointments.length} />
             <MetricCard label="Finalizados" value={finishedAppointments.length} />
-            <MetricCard label="Usuários ativos" value={activeUsers.length} />
+            <MetricCard label="Usuarios ativos" value={activeUsers.length} />
             <MetricCard label="Separadores" value={users.filter((user) => user.position === 'SEPARADOR').length} />
           </section>
 
           <section className="grid grid-cols-1 xl:grid-cols-2 gap-6 mb-6">
             <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-6">
-              <h3 className="text-lg text-slate-900 dark:text-white mb-4">Apontamentos por operação</h3>
+              <h3 className="text-lg text-slate-900 dark:text-white mb-4">Apontamentos por operacao</h3>
               <div className="space-y-4">
                 {operationCounts.map((item) => (
                   <HorizontalBar
@@ -137,7 +156,7 @@ export default function SupervisorHome() {
 
             <OverviewTable
               title="Processos em aberto"
-              headers={['Documento', 'Operação', 'Usuário', 'Parceiro', 'Início']}
+              headers={['Documento', 'Operacao', 'Usuario', 'Parceiro', 'Inicio', 'Acoes']}
               emptyText="Nenhum processo em aberto."
               rows={openAppointments.map((apontamento) => [
                 apontamento.numero_documento,
@@ -145,6 +164,14 @@ export default function SupervisorHome() {
                 apontamento.user_name || '-',
                 apontamento.document.partner_name || '-',
                 formatDateTime(apontamento.data_inicio),
+                <button
+                  type="button"
+                  onClick={() => handleCancelProcess(apontamento)}
+                  disabled={cancelingId === apontamento.id}
+                  className="inline-flex items-center justify-center rounded-lg bg-red-600 hover:bg-red-700 disabled:bg-red-300 px-3 py-2 text-sm text-white transition-colors"
+                >
+                  Cancelar processo
+                </button>,
               ])}
             />
           </section>
@@ -241,4 +268,3 @@ function OverviewTable({
     </div>
   );
 }
-

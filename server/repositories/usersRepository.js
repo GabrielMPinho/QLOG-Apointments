@@ -33,8 +33,8 @@ export async function getUserById(id) {
           login,
           senha_hash,
           ativo,
-          criado,
-          atualizado
+          convert(varchar(19), criado, 126) as criado,
+          convert(varchar(19), atualizado, 126) as atualizado
         from dbo.tb_qlog_usuarios
         where id = @id
       `,
@@ -58,8 +58,8 @@ export async function getUserByLogin(username) {
           login,
           senha_hash,
           ativo,
-          criado,
-          atualizado
+          convert(varchar(19), criado, 126) as criado,
+          convert(varchar(19), atualizado, 126) as atualizado
         from dbo.tb_qlog_usuarios
         where lower(login) = lower(@username)
            or lower(nome) = lower(@username)
@@ -85,8 +85,8 @@ export async function listUsers() {
         login,
         senha_hash,
         ativo,
-        criado,
-        atualizado
+        convert(varchar(19), criado, 126) as criado,
+        convert(varchar(19), atualizado, 126) as atualizado
       from dbo.tb_qlog_usuarios
       order by ativo desc, nome asc
     `);
@@ -243,4 +243,3 @@ export async function deactivateUser(id) {
   db.prepare('update users set is_active = 0, updated_at = current_timestamp where id = ?').run(id);
   return mapUser(await getUserById(id));
 }
-

@@ -18,6 +18,7 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 ENV PORT=3001
+ENV TZ=America/Sao_Paulo
 
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
