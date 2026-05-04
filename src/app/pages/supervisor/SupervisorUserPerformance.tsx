@@ -1,4 +1,6 @@
-import { Box, Clock, FileCheck2, Package, PauseCircle, XCircle } from 'lucide-react';
+import { AlertCircle, Box, Clock, FileCheck2, Package, PauseCircle, XCircle } from 'lucide-react';
+import { formatDistanceToNow } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
 import type { ReactNode } from 'react';
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router';
@@ -23,20 +25,49 @@ export default function SupervisorUserPerformance() {
   const { id } = useParams();
   const [data, setData] = useState<PerformanceResponse | null>(null);
   const [error, setError] = useState('');
+  const [actionError, setActionError] = useState('');
+  const [isClosingProcess, setIsClosingProcess] = useState(false);
 
-  useEffect(() => {
+  const loadPerformance = async () => {
     if (!id) return;
 
-    const loadPerformance = () => {
-      apiRequest<PerformanceResponse>(`/api/supervisor/users/${id}/performance`)
-        .then(setData)
-        .catch((error) =>
-          setError(error instanceof Error ? error.message : 'Nao foi possivel carregar performance.')
-        );
-    };
+    setError('');
 
+    try {
+      setData(await apiRequest<PerformanceResponse>(`/api/supervisor/users/${id}/performance`));
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Nao foi possivel carregar performance.');
+    }
+  };
+
+  useEffect(() => {
     loadPerformance();
   }, [id]);
+
+  const activeDocument =
+    data?.documents.find((document) => document.status === 'DOING' && !document.finished_at) || null;
+
+  const elapsedLabel = activeDocument?.started_at
+    ? formatDistanceToNow(new Date(activeDocument.started_at), { locale: ptBR, addSuffix: true })
+    : '-';
+
+  const handleCloseOpenProcess = async () => {
+    if (!id || !activeDocument) return;
+
+    setActionError('');
+    setIsClosingProcess(true);
+
+    try {
+      await apiRequest(`/api/supervisor/users/${id}/close-open`, {
+        method: 'POST',
+      });
+      await loadPerformance();
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Nao foi possivel encerrar o processo.');
+    } finally {
+      setIsClosingProcess(false);
+    }
+  };
 
   return (
     <div className="max-w-7xl mx-auto">
@@ -60,6 +91,61 @@ export default function SupervisorUserPerformance() {
 
         {data && (
           <>
+            {activeDocument && (
+              <section className="bg-amber-50/80 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/30 rounded-2xl p-6 mb-6 shadow-sm">
+                <div className="flex items-start gap-4">
+                  <AlertCircle className="w-6 h-6 text-amber-600 dark:text-amber-300 mt-1" />
+                  <div className="flex-1">
+                    <h3 className="text-lg text-slate-900 dark:text-slate-100 mb-1">
+                      Processo em Andamento
+                    </h3>
+                    <p className="text-slate-600 dark:text-slate-300 mb-4">
+                      Este separador possui um processo ativo. Encerre-o antes de delegar outro.
+                    </p>
+
+                    {actionError && (
+                      <div className="bg-red-50 dark:bg-red-500/10 text-red-700 dark:text-red-200 border border-red-200 dark:border-red-500/30 rounded-xl px-4 py-3 mb-4">
+                        {actionError}
+                      </div>
+                    )}
+
+                    <div className="bg-white/85 dark:bg-slate-900/45 border border-transparent dark:border-slate-700/70 rounded-xl p-4 mb-4">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <p className="text-sm text-slate-500 dark:text-slate-400">Operacao</p>
+                          <p className="text-slate-900 dark:text-slate-100">{activeDocument.operation}</p>
+                        </div>
+                        <div>
+                          <p className="text-sm text-slate-500 dark:text-slate-400">Documento</p>
+                          <p className="text-slate-900 dark:text-slate-100">
+                            {activeDocument.document_number}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-sm text-slate-500 dark:text-slate-400">Cliente</p>
+                          <p className="text-slate-900 dark:text-slate-100">
+                            {activeDocument.partner_name || '-'}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-sm text-slate-500 dark:text-slate-400">Tempo Decorrido</p>
+                          <p className="text-slate-900 dark:text-slate-100">{elapsedLabel}</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={handleCloseOpenProcess}
+                      disabled={isClosingProcess}
+                      className="bg-red-600 hover:bg-red-700 disabled:bg-red-300 dark:bg-red-500/90 dark:hover:bg-red-500 dark:disabled:bg-red-500/50 text-white px-6 py-3 rounded-xl transition-colors shadow-sm"
+                    >
+                      {isClosingProcess ? 'Encerrando...' : 'Encerrar Processo'}
+                    </button>
+                  </div>
+                </div>
+              </section>
+            )}
+
             <section className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-6 mb-6">
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                 <div>

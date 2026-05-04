@@ -1,4 +1,4 @@
-import { Edit3, Plus, Send, Trash2 } from 'lucide-react';
+import { BarChart3, Edit3, Plus, Send, Trash2 } from 'lucide-react';
 import { FormEvent, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { ApiUser, apiRequest } from '../../services/api';
@@ -173,13 +173,22 @@ export default function SupervisorUsers() {
                           Editar
                         </button>
                         {user.position === 'SEPARADOR' && (
-                          <button
-                            onClick={() => navigate(`/supervisor/delegar?separadorId=${user.id}`)}
-                            className="inline-flex items-center gap-1 px-3 py-2 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:hover:bg-blue-500/30 dark:text-blue-200 text-sm"
-                          >
-                            <Send className="w-4 h-4" />
-                            Delegar
-                          </button>
+                          <>
+                            <button
+                              onClick={() => navigate(`/supervisor/delegar?separadorId=${user.id}`)}
+                              className="inline-flex items-center gap-1 px-3 py-2 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:hover:bg-blue-500/30 dark:text-blue-200 text-sm"
+                            >
+                              <Send className="w-4 h-4" />
+                              Delegar
+                            </button>
+                            <button
+                              onClick={() => navigate(`/supervisor/users/${user.id}/performance`)}
+                              className="inline-flex items-center gap-1 px-3 py-2 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:hover:bg-amber-500/30 dark:text-amber-200 text-sm"
+                            >
+                              <BarChart3 className="w-4 h-4" />
+                              Dados
+                            </button>
+                          </>
                         )}
                         <button
                           onClick={() => handleDelete(user)}

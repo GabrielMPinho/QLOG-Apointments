@@ -12,7 +12,9 @@ playwright-report/
 
 # Environment files
 .env
-.env.*
+.env.local
+.env.prod
+.env.staging
 !.env.example
 *.local
 

@@ -94,10 +94,6 @@ export default function SupervisorHome() {
             Documentos são referência; execução operacional é controlada por apontamentos.
           </p>
         </div>
-        <div className="hidden md:flex items-center gap-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-3 text-slate-600 dark:text-slate-300">
-          <BarChart3 className="w-5 h-5 text-blue-600 dark:text-blue-300" />
-          Dados carregados da API
-        </div>
       </div>
 
       {error && (

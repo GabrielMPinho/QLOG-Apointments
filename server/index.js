@@ -1,4 +1,6 @@
 import express from 'express';
+import { existsSync } from 'node:fs';
+import path from 'node:path';
 import { createApontamentosRouter } from './controllers/apontamentosController.js';
 import { isSqlServer, normalizeActive } from './lib/database.js';
 import { normalizeOperationCode } from './lib/operations.js';
@@ -20,6 +22,7 @@ import { createApontamentosService } from './services/apontamentosService.js';
 
 const app = express();
 const port = Number(process.env.PORT || 3001);
+const staticPath = path.resolve(process.cwd(), 'dist');
 const apontamentosService = createApontamentosService(apontamentosRepository);
 
 if (!isSqlServer) {
@@ -310,6 +313,32 @@ app.get('/api/supervisor/users/:id/performance', requireSupervisor, async (req, 
   }
 });
 
+app.post('/api/supervisor/users/:id/close-open', requireSupervisor, async (req, res, next) => {
+  try {
+    const targetUser = mapUser(await getUserById(req.params.id));
+
+    if (!targetUser) {
+      return res.status(404).json({ message: 'Usuario nao encontrado.' });
+    }
+
+    if (targetUser.position !== 'SEPARADOR') {
+      return res.status(400).json({ message: 'Encerramento permitido apenas para separadores.' });
+    }
+
+    const apontamento = await apontamentosService.closeOpenByUser(targetUser.id);
+
+    return res.json({
+      sucesso: true,
+      apontamento,
+      process: apontamentosService.toProcess(apontamento),
+    });
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({
+      message: error.message || 'Nao foi possivel encerrar o processo.',
+    });
+  }
+});
+
 app.get('/api/supervisor/apontamentos', requireSupervisor, async (req, res, next) => {
   try {
     const { userId, status } = req.query;
@@ -410,11 +439,18 @@ app.post('/api/operator/documents/:id/end', requireUser, async (req, res) => {
   }
 });
 
+if (existsSync(staticPath)) {
+  app.use(express.static(staticPath));
+  app.get(/^(?!\/api(?:\/|$)|\/apontamentos(?:\/|$)).*/, (_req, res) => {
+    res.sendFile(path.join(staticPath, 'index.html'));
+  });
+}
+
 app.use((error, _req, res, _next) => {
   console.error(error);
   res.status(500).json({ message: 'Erro interno da API.' });
 });
 
 app.listen(port, () => {
-  console.log(`QLOG API running on http://127.0.0.1:${port}`);
+  console.log(`QLOG running on http://0.0.0.0:${port}`);
 });

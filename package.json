@@ -12,7 +12,7 @@
     "api": "node --no-warnings server/index.js",
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0 --port 4173",
-    "start": "npm run dev"
+    "start": "node --no-warnings server/index.js"
   },
   "dependencies": {
     "date-fns": "3.6.0",

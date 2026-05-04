@@ -1,0 +1,21 @@
+services:
+  qlog:
+    build:
+      context: .
+    image: qlog-appointments:latest
+    container_name: qlog-appointments
+    env_file:
+      - .env
+      - .env.local
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+    ports:
+      - "3001:3001"
+    restart: unless-stopped
+    extra_hosts:
+      - "lmpbdl02:${SQLSERVER_IP}"
+
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1

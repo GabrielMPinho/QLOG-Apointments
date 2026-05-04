@@ -79,9 +79,41 @@ Preview the production build:
 npm run preview
 ```
 
+## Docker
+
+Build the production image:
+
+```bash
+docker build -t qlog-appointments:latest .
+```
+
+Run the container:
+
+```bash
+docker run --env-file .env -p 3001:3001 qlog-appointments:latest
+```
+
+Or use Docker Compose:
+
+```bash
+docker compose up --build
+```
+
+The production container serves both the Express API and the built React app on port `3001`.
+
+If SQL Server runs on the host machine, set `SQLSERVER_HOST=host.docker.internal` in `.env`. If SQL Server is in another container or server, use that service name or network address instead.
+
+Health check:
+
+```bash
+curl http://localhost:3001/api/health
+```
+
 ## Project Structure
 
 ```text
+Dockerfile           Production image definition
+docker-compose.yml   Local production-like container runner
 server/              Express API, services, repositories, and database access
 src/                 React application
 src/app/components/  Shared frontend components
