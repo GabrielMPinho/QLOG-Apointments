@@ -2,16 +2,19 @@
 node_modules/
 .pnpm-store/
 
-# Build output
+# Build and test output
 dist/
 build/
 coverage/
-*.local
+test-results/
+playwright-report/
+.playwright-cli/
 
 # Environment files
 .env
 .env.*
 !.env.example
+*.local
 
 # Logs
 logs/
@@ -22,18 +25,14 @@ yarn-error.log*
 pnpm-debug.log*
 
 # Local/runtime databases
-database/*.db
-database/*.db-*
-database/*.sqlite
-database/*.sqlite3
-database/*.sqbpro
+database/
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.sqbpro
 
-# Playwright/test artifacts
-.playwright-cli/
-test-results/
-playwright-report/
-
-# OS/editor files
+# OS and editor files
 .DS_Store
 Thumbs.db
 .vscode/

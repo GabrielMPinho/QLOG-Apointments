@@ -1,131 +1,124 @@
-# QLOG Apontamentos
+# QLOG Appointments
 
-Sistema web para apontamentos de operacoes logisticas. O documento e apenas referencia operacional; a execucao do processo e controlada por apontamentos.
+QLOG Appointments is a web application for tracking logistics operation appointments. The document is used as operational context, while execution state is controlled by appointments.
 
 ## Stack
 
-- Frontend: React, Vite e TypeScript
-- UI: Tailwind CSS e componentes locais
-- Backend: Node.js e Express
-- Banco principal: SQL Server, database `DADOS_BI`
-- Banco local: SQLite apenas como fallback/desenvolvimento local
+- React, Vite, and TypeScript
+- Tailwind CSS
+- Node.js and Express
+- SQL Server as the production database
+- SQLite fallback for local development
 
-## Estrutura
+## Requirements
 
-```text
-Qlog/
-  src/                  Frontend React
-  server/               API Express, services e repositories
-  server/controllers/   Rotas HTTP
-  server/services/      Regras de negocio
-  server/repositories/  Persistencia SQL Server/SQLite
-  server/lib/           Conexao com banco e utilitarios
-  docs/                 Documentacao tecnica
-  dist/                 Build gerado pelo Vite
-```
+- Node.js 22 or newer
+- npm
+- SQL Server access for production-like usage
 
-## Configuracao
+## Setup
 
-Crie um arquivo `.env` na raiz do projeto. O arquivo real nao deve ser versionado.
-
-Variaveis usadas:
-
-```env
-PORT=3001
-DB_PROVIDER=sqlserver
-SQLSERVER_HOST=
-SQLSERVER_PORT=1433
-SQLSERVER_USER=
-SQLSERVER_PASSWORD=
-SQLSERVER_DATABASE=DADOS_BI
-SQLSERVER_ENCRYPT=false
-SQLSERVER_TRUST_SERVER_CERTIFICATE=true
-```
-
-Tambem e possivel usar `SQLSERVER_CONNECTION_STRING` se preferir centralizar a conexao em uma unica string.
-
-## Banco De Dados
-
-A aplicacao consulta e grava no SQL Server `DADOS_BI`.
-
-Tabelas principais:
-
-- `DADOS_BI.dbo.tb_qlog_usuarios`
-- `DADOS_BI.dbo.tb_qlog_documentos`
-- `DADOS_BI.dbo.tb_qlog_apontamentos`
-- `DADOS_BI.dbo.tb_qlog_eventos_documento`
-
-Regras atuais:
-
-- Documento nao possui estado operacional da execucao.
-- Documento nao usa `tipo_operacao_id`.
-- Operacao pertence ao apontamento.
-- Um usuario pode ter apenas um apontamento aberto.
-- Varios usuarios podem trabalhar no mesmo documento ao mesmo tempo.
-- Ao finalizar um apontamento, a operacao finalizada deixa de aparecer para aquele documento.
-- A tabela `tb_qlog_documentos` nao e alterada ao iniciar ou encerrar apontamentos.
-
-## Operacoes
-
-Operacoes suportadas:
-
-- Descarga
-- Conferencia
-- Armazenagem
-- Separacao
-- Etiquetagem
-- Expedicao
-
-Busca de documentos:
-
-- NF: `tabela_origem = SF1`, `status = DISPONIVEL`
-- PV: `tabela_origem = SC5`, `status = DISPONIVEL`
-- Quando `status_protheus` existir e estiver preenchido:
-  - Separacao usa `05`
-  - Etiquetagem e Expedicao usam `04`
-
-## Desenvolvimento
-
-Instale as dependencias:
+Install dependencies:
 
 ```bash
 npm install
 ```
 
-Rode frontend e API juntos:
+Create a local environment file:
+
+```bash
+cp .env.example .env
+```
+
+Update `.env` with your database credentials.
+
+## Environment Variables
+
+| Variable | Description |
+| --- | --- |
+| `PORT` | API port. Defaults to `3001`. |
+| `DB_PROVIDER` | Database provider. Use `sqlserver` for SQL Server or leave unset for SQLite fallback. |
+| `SQLSERVER_CONNECTION_STRING` | Optional full SQL Server connection string. |
+| `SQLSERVER_HOST` | SQL Server host. |
+| `SQLSERVER_PORT` | SQL Server port. Defaults to `1433`. |
+| `SQLSERVER_USER` | SQL Server username. |
+| `SQLSERVER_PASSWORD` | SQL Server password. |
+| `SQLSERVER_DATABASE` | SQL Server database name. Defaults to `DADOS_BI`. |
+| `SQLSERVER_ENCRYPT` | Enables SQL Server encryption when set to `true`. |
+| `SQLSERVER_TRUST_SERVER_CERTIFICATE` | Trusts the SQL Server certificate when set to `true`. |
+
+## Development
+
+Run the API and frontend together:
 
 ```bash
 npm run dev
 ```
 
-Scripts uteis:
+Run only the API:
 
 ```bash
 npm run api
+```
+
+Run only the frontend:
+
+```bash
 npm run dev:frontend
+```
+
+Build the frontend:
+
+```bash
 npm run build
 ```
 
-## Fluxo Principal
+Preview the production build:
 
-1. Usuario faz login.
-2. Usuario escolhe uma operacao.
-3. API lista documentos disponiveis para a operacao.
-4. Usuario inicia um apontamento.
-5. API bloqueia novo apontamento se o usuario ja tiver um processo aberto.
-6. Usuario encerra o apontamento.
-7. API grava `data_hora_fim` em `tb_qlog_apontamentos`.
+```bash
+npm run preview
+```
 
-## Supervisor
+## Project Structure
 
-O supervisor pode:
+```text
+server/              Express API, services, repositories, and database access
+src/                 React application
+src/app/components/  Shared frontend components
+src/app/context/     Application state
+src/app/pages/       Operator and supervisor screens
+src/app/services/    Frontend API client
+src/styles/          Global styles and Tailwind theme
+```
 
-- Gerenciar usuarios.
-- Editar dados de usuario.
-- Delegar um separador a um documento e operacao.
-- Consultar apontamentos, historico e performance.
+## Main Workflow
 
-## Observacoes
+1. The user signs in.
+2. The user chooses a logistics operation.
+3. The API lists available documents for that operation.
+4. The user starts an appointment.
+5. The API prevents the same user from opening more than one appointment at a time.
+6. The user finishes the appointment.
+7. The API stores the finish timestamp in the appointments table.
 
-- Nao versionar `.env`, logs, `dist`, `node_modules` ou bancos locais.
-- Reinicie `npm run dev` apos alteracoes no backend; a API nao usa hot reload.
+## Database
+
+The SQL Server implementation expects the following tables in `DADOS_BI`:
+
+- `dbo.tb_qlog_usuarios`
+- `dbo.tb_qlog_documentos`
+- `dbo.tb_qlog_apontamentos`
+- `dbo.tb_qlog_eventos_documento`
+
+Supported operations:
+
+- Unloading
+- Checking
+- Storage
+- Picking
+- Labeling
+- Shipping
+
+## Repository Hygiene
+
+The repository intentionally excludes generated builds, dependencies, logs, local databases, Playwright artifacts, and real environment files.
