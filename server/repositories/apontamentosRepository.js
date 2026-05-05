@@ -27,6 +27,7 @@ export function mapApontamento(row) {
     '';
   const dataInicio = row.data_inicio || row.data_hora_inicio;
   const dataFim = row.data_fim || row.data_hora_fim || null;
+  const operationalStatus = row.appointment_status || row.status_operacional || (dataFim ? 'FINALIZADO' : 'INICIADO');
   const elapsedMinutes =
     row.elapsed_minutes !== undefined && row.elapsed_minutes !== null
       ? Number(row.elapsed_minutes)
@@ -46,7 +47,7 @@ export function mapApontamento(row) {
     documento_id: row.documento_id ? String(row.documento_id) : null,
     data_inicio: dataInicio,
     data_fim: dataFim,
-    status: dataFim ? 'FINALIZADO' : 'EM_ANDAMENTO',
+    status: operationalStatus,
     document: {
       origin: row.source_table || row.tabela_origem || '',
       type: row.document_type || row.tipo_documento || '',
@@ -112,12 +113,20 @@ const sqlServerSelectApontamentosSql = `
     convert(varchar(10), d.data_documento, 23) as data_documento,
     d.peso_bruto,
     d.peso_liquido,
+    latest_status.status_novo as appointment_status,
     try_convert(int, json_value(ev.metadados, '$.delegated_by_user_id')) as delegated_by_user_id,
     delegator.nome as delegated_by_user_name,
     delegator.login as delegated_by_username
   from DADOS_BI.dbo.tb_qlog_apontamentos a
   left join dbo.tb_qlog_usuarios u on u.id = a.usuario_id
   left join DADOS_BI.dbo.tb_qlog_documentos d on d.id = a.documento_id
+  outer apply (
+    select top 1 e.status_novo
+    from dbo.tb_qlog_eventos_documento e
+    where e.apontamento_id = a.id
+      and e.status_novo is not null
+    order by e.data_hora_evento desc, e.id desc
+  ) latest_status
   outer apply (
     select top 1 e.metadados
     from dbo.tb_qlog_eventos_documento e
@@ -213,12 +222,138 @@ function insertSqliteDocumentEvent({
     );
 }
 
+const DOCUMENT_EVENT_TYPES = [
+  { id: 1, status: 'DISPONIVEL' },
+  { id: 2, status: 'INICIADO' },
+  { id: 3, status: 'CANCELADO' },
+  { id: 4, status: 'FINALIZADO' },
+];
+
+const DOCUMENT_EVENT_TYPE_ID = Object.freeze({
+  DISPONIVEL: 1,
+  INICIADO: 2,
+  CANCELADO: 3,
+  FINALIZADO: 4,
+});
+
+export async function syncSqlServerDocumentEventTypes() {
+  if (!isSqlServer) return;
+
+  const columnsResult = await sqlQuery(`
+    select lower(name) as name
+    from sys.columns
+    where object_id = object_id('dbo.tb_qlog_tipos_evento_documento')
+  `);
+  const columns = new Set(columnsResult.recordset.map((column) => column.name));
+
+  if (!columns.has('id')) return;
+
+  if (columns.has('descricao')) {
+    try {
+      await sqlQuery(`
+        declare @sql nvarchar(max) = N'';
+
+        select @sql = @sql + N'alter table dbo.tb_qlog_tipos_evento_documento drop constraint '
+          + quotename(dc.name) + N';'
+        from sys.default_constraints dc
+        join sys.columns c
+          on c.object_id = dc.parent_object_id
+         and c.column_id = dc.parent_column_id
+        where dc.parent_object_id = object_id('dbo.tb_qlog_tipos_evento_documento')
+          and c.name = 'descricao';
+
+        if @sql <> N'' exec sp_executesql @sql;
+
+        alter table dbo.tb_qlog_tipos_evento_documento drop column descricao;
+      `);
+      columns.delete('descricao');
+    } catch (error) {
+      console.warn('Nao foi possivel remover dbo.tb_qlog_tipos_evento_documento.descricao:', error.message);
+    }
+  }
+
+  const statusColumns = ['codigo', 'nome', 'status', 'tipo_evento', 'descricao']
+    .filter((column) => columns.has(column));
+  const hasActiveColumn = columns.has('ativo');
+  const hasCreatedColumn = columns.has('criado');
+  const hasUpdatedColumn = columns.has('atualizado');
+
+  await sqlQuery('delete from dbo.tb_qlog_tipos_evento_documento where id not in (1, 2, 3, 4)');
+
+  for (const eventType of DOCUMENT_EVENT_TYPES) {
+    const updateAssignments = [
+      ...statusColumns.map((column) => `${column} = @status`),
+      ...(hasActiveColumn ? ['ativo = 1'] : []),
+      ...(hasUpdatedColumn ? ['atualizado = getdate()'] : []),
+    ];
+    const insertColumns = [
+      'id',
+      ...statusColumns,
+      ...(hasActiveColumn ? ['ativo'] : []),
+      ...(hasCreatedColumn ? ['criado'] : []),
+      ...(hasUpdatedColumn ? ['atualizado'] : []),
+    ];
+    const insertValues = [
+      '@id',
+      ...statusColumns.map(() => '@status'),
+      ...(hasActiveColumn ? ['1'] : []),
+      ...(hasCreatedColumn ? ['getdate()'] : []),
+      ...(hasUpdatedColumn ? ['getdate()'] : []),
+    ];
+    const updateExistingSql = updateAssignments.length
+      ? `
+          update dbo.tb_qlog_tipos_evento_documento
+          set ${updateAssignments.join(', ')}
+          where id = @id
+        `
+      : 'select 1';
+
+    await sqlQuery(
+      `
+        if exists (select 1 from dbo.tb_qlog_tipos_evento_documento where id = @id)
+        begin
+          ${updateExistingSql}
+        end
+        else
+        begin
+          insert into dbo.tb_qlog_tipos_evento_documento (${insertColumns.join(', ')})
+          values (${insertValues.join(', ')})
+        end
+      `,
+      {
+        id: { type: sql.Int, value: eventType.id },
+        status: { type: sql.NVarChar(100), value: eventType.status },
+      }
+    );
+  }
+}
+
 async function getSqlServerDocumentStatus(documentoId) {
   const result = await sqlQuery(
     `
       select top 1 status
-      from DADOS_BI.dbo.tb_qlog_documentos
-      where id = @documentoId
+      from (
+        select
+          status_novo as status,
+          data_hora_evento,
+          id,
+          1 as priority
+        from dbo.tb_qlog_eventos_documento
+        where documento_id = @documentoId
+          and status_novo is not null
+
+        union all
+
+        select
+          status,
+          atualizado,
+          0,
+          2
+        from DADOS_BI.dbo.tb_qlog_documentos
+        where id = @documentoId
+      ) status_history
+      where status is not null
+      order by priority asc, data_hora_evento desc, id desc
     `,
     { documentoId: { type: sql.Int, value: Number(documentoId) } }
   );
@@ -238,6 +373,26 @@ async function updateSqlServerDocumentStatus(documentoId, status) {
       documentoId: { type: sql.Int, value: Number(documentoId) },
       status: { type: sql.NVarChar(100), value: status },
     }
+  );
+}
+
+async function updateSqlServerDocumentStatusFromLatestEvent(documentoId) {
+  await sqlQuery(
+    `
+      update d
+      set d.status = latest.status_novo,
+          d.atualizado = getdate()
+      from DADOS_BI.dbo.tb_qlog_documentos d
+      cross apply (
+        select top 1 e.status_novo
+        from dbo.tb_qlog_eventos_documento e
+        where e.documento_id = d.id
+          and e.status_novo is not null
+        order by e.data_hora_evento desc, e.id desc
+      ) latest
+      where d.id = @documentoId
+    `,
+    { documentoId: { type: sql.Int, value: Number(documentoId) } }
   );
 }
 
@@ -441,7 +596,7 @@ export async function createApontamento({
           getdate(),
           null
         from DADOS_BI.dbo.tb_qlog_documentos d
-        where upper(ltrim(rtrim(convert(varchar(50), d.status)))) = 'DISPONIVEL'
+        where upper(ltrim(rtrim(convert(varchar(50), d.status)))) in ('DISPONIVEL', 'CANCELADO')
           and ${documentEligibilityWhere}
           and not exists (
             select 1
@@ -454,10 +609,6 @@ export async function createApontamento({
                 from dbo.tb_qlog_eventos_documento cancel_event
                 where cancel_event.apontamento_id = completed.id
                   and cancel_event.tipo_evento_id = 3
-                  and (
-                    json_value(cancel_event.metadados, '$.acao') = 'processo_cancelado'
-                    or json_value(cancel_event.metadados, '$.evento') = 'APONTAMENTO_CANCELADO'
-                  )
               )
           )
           and (
@@ -474,36 +625,25 @@ export async function createApontamento({
 
     const apontamento = await findById(insertedId);
     const statusAntigo = await getSqlServerDocumentStatus(apontamento.documento_id);
-    await updateSqlServerDocumentStatus(apontamento.documento_id, 'INDISPONIVEL');
+    await updateSqlServerDocumentStatus(apontamento.documento_id, 'INICIADO');
 
     await insertSqlServerDocumentEvent({
       documentoId: apontamento.documento_id,
       apontamentoId: apontamento.id,
       usuarioId: apontamento.user_id,
-      tipoEventoId: 1,
-      metadata: {
-        acao: 'processo_iniciado',
-        evento: 'APONTAMENTO_INICIADO',
-        tipo_operacao_id: opId,
-        ...(delegatedByUserId ? { delegated_by_user_id: Number(delegatedByUserId) } : {}),
-      },
-    });
-
-    await insertSqlServerDocumentEvent({
-      documentoId: apontamento.documento_id,
-      apontamentoId: apontamento.id,
-      usuarioId: apontamento.user_id,
-      tipoEventoId: 1,
+      tipoEventoId: DOCUMENT_EVENT_TYPE_ID.INICIADO,
       statusAntigo,
       statusNovo: 'INICIADO',
       metadata: {
         acao: 'status_alterado',
         evento: 'STATUS_ALTERADO',
-        status_operacional_novo: 'INICIADO',
+        tipo_operacao_id: opId,
         status_documento_antigo: statusAntigo,
-        status_documento_novo: 'INDISPONIVEL',
+        status_documento_novo: 'INICIADO',
+        ...(delegatedByUserId ? { delegated_by_user_id: Number(delegatedByUserId) } : {}),
       },
     });
+    await updateSqlServerDocumentStatusFromLatestEvent(apontamento.documento_id);
 
     return apontamento;
   }
@@ -523,32 +663,21 @@ export async function createApontamento({
     const statusAntigo = hasColumn('documents', 'status')
       ? db.prepare('select status from documents where id = ?').get(document.id)?.status ?? null
       : null;
-    updateSqliteDocumentStatus(document.id, 'INDISPONIVEL');
+    updateSqliteDocumentStatus(document.id, 'INICIADO');
 
     insertSqliteDocumentEvent({
       documentoId: document.id,
       usuarioId: userId,
-      tipoEventoId: 1,
-      metadata: {
-        acao: 'processo_iniciado',
-        evento: 'APONTAMENTO_INICIADO',
-        tipo_operacao_id: operationId(tipoOperacao),
-        ...(delegatedByUserId ? { delegated_by_user_id: Number(delegatedByUserId) } : {}),
-      },
-    });
-
-    insertSqliteDocumentEvent({
-      documentoId: document.id,
-      usuarioId: userId,
-      tipoEventoId: 1,
+      tipoEventoId: DOCUMENT_EVENT_TYPE_ID.INICIADO,
       statusAntigo,
       statusNovo: 'INICIADO',
       metadata: {
         acao: 'status_alterado',
         evento: 'STATUS_ALTERADO',
-        status_operacional_novo: 'INICIADO',
+        tipo_operacao_id: operationId(tipoOperacao),
         status_documento_antigo: statusAntigo,
-        status_documento_novo: 'INDISPONIVEL',
+        status_documento_novo: 'INICIADO',
+        ...(delegatedByUserId ? { delegated_by_user_id: Number(delegatedByUserId) } : {}),
       },
     });
   }
@@ -573,31 +702,23 @@ export async function closeApontamento(id) {
       { id: { type: sql.Int, value: Number(id) } }
     );
 
-    await updateSqlServerDocumentStatus(apontamento.documento_id, 'INDISPONIVEL');
+    await updateSqlServerDocumentStatus(apontamento.documento_id, 'FINALIZADO');
 
     await insertSqlServerDocumentEvent({
       documentoId: apontamento.documento_id,
       apontamentoId: apontamento.id,
       usuarioId: apontamento.user_id,
-      tipoEventoId: 2,
-      metadata: { acao: 'processo_finalizado', evento: 'APONTAMENTO_FINALIZADO' },
-    });
-
-    await insertSqlServerDocumentEvent({
-      documentoId: apontamento.documento_id,
-      apontamentoId: apontamento.id,
-      usuarioId: apontamento.user_id,
-      tipoEventoId: 2,
+      tipoEventoId: DOCUMENT_EVENT_TYPE_ID.FINALIZADO,
       statusAntigo,
       statusNovo: 'FINALIZADO',
       metadata: {
         acao: 'status_alterado',
         evento: 'STATUS_ALTERADO',
-        status_operacional_novo: 'FINALIZADO',
         status_documento_antigo: statusAntigo,
-        status_documento_novo: 'INDISPONIVEL',
+        status_documento_novo: 'FINALIZADO',
       },
     });
+    await updateSqlServerDocumentStatusFromLatestEvent(apontamento.documento_id);
 
     return findById(id);
   }
@@ -617,27 +738,19 @@ export async function closeApontamento(id) {
   const document = getSqliteDocumentByAppointment(apontamento);
 
   if (document?.id) {
-    updateSqliteDocumentStatus(document.id, 'INDISPONIVEL');
+    updateSqliteDocumentStatus(document.id, 'FINALIZADO');
 
     insertSqliteDocumentEvent({
       documentoId: document.id,
       usuarioId: apontamento.user_id,
-      tipoEventoId: 2,
-      metadata: { acao: 'processo_finalizado', evento: 'APONTAMENTO_FINALIZADO' },
-    });
-
-    insertSqliteDocumentEvent({
-      documentoId: document.id,
-      usuarioId: apontamento.user_id,
-      tipoEventoId: 2,
+      tipoEventoId: DOCUMENT_EVENT_TYPE_ID.FINALIZADO,
       statusAntigo: document.status ?? null,
       statusNovo: 'FINALIZADO',
       metadata: {
         acao: 'status_alterado',
         evento: 'STATUS_ALTERADO',
-        status_operacional_novo: 'FINALIZADO',
         status_documento_antigo: document.status ?? null,
-        status_documento_novo: 'INDISPONIVEL',
+        status_documento_novo: 'FINALIZADO',
       },
     });
   }
@@ -653,7 +766,7 @@ export async function cancelApontamentoDocument({ apontamentoId, supervisorUserI
     if (!apontamento.documento_id) return null;
 
     const statusAntigo = await getSqlServerDocumentStatus(apontamento.documento_id);
-    await updateSqlServerDocumentStatus(apontamento.documento_id, 'DISPONIVEL');
+    await updateSqlServerDocumentStatus(apontamento.documento_id, 'CANCELADO');
 
     await sqlQuery(
       `
@@ -669,26 +782,18 @@ export async function cancelApontamentoDocument({ apontamentoId, supervisorUserI
       documentoId: apontamento.documento_id,
       apontamentoId: apontamento.id,
       usuarioId: supervisorUserId,
-      tipoEventoId: 3,
-      metadata: { acao: 'processo_cancelado', evento: 'APONTAMENTO_CANCELADO', origem: 'tela_supervisor' },
-    });
-
-    await insertSqlServerDocumentEvent({
-      documentoId: apontamento.documento_id,
-      apontamentoId: apontamento.id,
-      usuarioId: supervisorUserId,
-      tipoEventoId: 3,
+      tipoEventoId: DOCUMENT_EVENT_TYPE_ID.CANCELADO,
       statusAntigo,
       statusNovo: 'CANCELADO',
       metadata: {
         acao: 'status_alterado',
         evento: 'STATUS_ALTERADO',
         origem: 'tela_supervisor',
-        status_operacional_novo: 'CANCELADO',
         status_documento_antigo: statusAntigo,
-        status_documento_novo: 'DISPONIVEL',
+        status_documento_novo: 'CANCELADO',
       },
     });
+    await updateSqlServerDocumentStatusFromLatestEvent(apontamento.documento_id);
 
     return findById(apontamento.id);
   }
@@ -697,7 +802,7 @@ export async function cancelApontamentoDocument({ apontamentoId, supervisorUserI
 
   if (!document?.id) return null;
 
-  updateSqliteDocumentStatus(document.id, 'DISPONIVEL');
+  updateSqliteDocumentStatus(document.id, 'CANCELADO');
 
   db
     .prepare(`
@@ -711,23 +816,15 @@ export async function cancelApontamentoDocument({ apontamentoId, supervisorUserI
   insertSqliteDocumentEvent({
     documentoId: document.id,
     usuarioId: supervisorUserId,
-    tipoEventoId: 3,
-    metadata: { acao: 'processo_cancelado', evento: 'APONTAMENTO_CANCELADO', origem: 'tela_supervisor' },
-  });
-
-  insertSqliteDocumentEvent({
-    documentoId: document.id,
-    usuarioId: supervisorUserId,
-    tipoEventoId: 3,
+    tipoEventoId: DOCUMENT_EVENT_TYPE_ID.CANCELADO,
     statusAntigo: document.status ?? null,
     statusNovo: 'CANCELADO',
     metadata: {
       acao: 'status_alterado',
       evento: 'STATUS_ALTERADO',
       origem: 'tela_supervisor',
-      status_operacional_novo: 'CANCELADO',
       status_documento_antigo: document.status ?? null,
-      status_documento_novo: 'DISPONIVEL',
+      status_documento_novo: 'CANCELADO',
     },
   });
 

@@ -27,6 +27,8 @@ const apontamentosService = createApontamentosService(apontamentosRepository);
 
 if (!isSqlServer) {
   initializeDatabase();
+} else {
+  await apontamentosRepository.syncSqlServerDocumentEventTypes();
 }
 
 app.use(express.json());
@@ -73,6 +75,12 @@ async function requireSupervisor(req, res, next) {
 }
 
 function appointmentAsSupervisorRow(apontamento) {
+  const status = {
+    INICIADO: 'DOING',
+    CANCELADO: 'CANCELLED',
+    FINALIZADO: 'DONE',
+  }[apontamento.status] || (apontamento.data_fim ? 'DONE' : 'DOING');
+
   return {
     id: apontamento.id,
     origin: apontamento.document.origin,
@@ -89,7 +97,7 @@ function appointmentAsSupervisorRow(apontamento) {
     skus: apontamento.document.skus,
     gross_weight: apontamento.document.gross_weight,
     net_weight: apontamento.document.net_weight,
-    status: apontamento.data_fim ? 'DONE' : 'DOING',
+    status,
     current_user_id: apontamento.user_id,
     current_user_name: apontamento.user_name,
     current_username: apontamento.username,
@@ -106,7 +114,7 @@ function documentsResponse(result) {
 }
 
 app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, provider: isSqlServer ? 'sqlserver' : 'sqlite' });
+  res.json({ ok: true, provider: 'sqlserver'});
 });
 
 app.post('/api/login', async (req, res, next) => {
@@ -292,15 +300,16 @@ app.get('/api/supervisor/users/:id/performance', requireSupervisor, async (req, 
     }
 
     const apontamentos = await apontamentosRepository.listAll({ userId: req.params.id });
-    const finished = apontamentos.filter((item) => item.data_fim);
+    const finished = apontamentos.filter((item) => item.status === 'FINALIZADO');
+    const cancelled = apontamentos.filter((item) => item.status === 'CANCELADO');
     const totalMinutes = finished.reduce((sum, item) => sum + Number(item.time_spent_minutes || 0), 0);
 
     res.json({
       user,
       indicators: {
         total_done_documents: finished.length,
-        total_doing_documents: apontamentos.filter((item) => !item.data_fim).length,
-        total_cancelled_documents: 0,
+        total_doing_documents: apontamentos.filter((item) => item.status === 'INICIADO').length,
+        total_cancelled_documents: cancelled.length,
         total_volumes_processed: finished.reduce((sum, item) => sum + item.document.volumes, 0),
         total_skus_processed: finished.reduce((sum, item) => sum + item.document.skus, 0),
         average_finished_minutes: finished.length > 0 ? Math.round(totalMinutes / finished.length) : 0,

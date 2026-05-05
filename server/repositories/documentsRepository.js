@@ -74,7 +74,7 @@ function documentMatchesSearch(document, search) {
 
 export async function listDocuments(filters = {}) {
   if (isSqlServer) {
-    const where = ["upper(ltrim(rtrim(convert(varchar(50), d.status)))) = 'DISPONIVEL'"];
+    const where = ["upper(ltrim(rtrim(convert(varchar(50), d.status)))) in ('DISPONIVEL', 'CANCELADO')"];
     const parameters = {};
     const operation = normalizeOperationCode(filters.operation);
     const opId = operationId(operation);
@@ -111,10 +111,6 @@ export async function listDocuments(filters = {}) {
               from dbo.tb_qlog_eventos_documento cancel_event
               where cancel_event.apontamento_id = a.id
                 and cancel_event.tipo_evento_id = 3
-                and (
-                  json_value(cancel_event.metadados, '$.acao') = 'processo_cancelado'
-                  or json_value(cancel_event.metadados, '$.evento') = 'APONTAMENTO_CANCELADO'
-                )
             )
         )
       `);
