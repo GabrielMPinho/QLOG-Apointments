@@ -15,7 +15,6 @@ export default function SupervisorUsers() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('123456');
   const [position, setPosition] = useState<'SEPARADOR' | 'SUPERVISOR'>('SEPARADOR');
-  const [isActive, setIsActive] = useState(true);
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
@@ -34,7 +33,6 @@ export default function SupervisorUsers() {
     setUsername('');
     setPassword('123456');
     setPosition('SEPARADOR');
-    setIsActive(true);
     setError('');
     setModalMode('create');
   };
@@ -45,7 +43,6 @@ export default function SupervisorUsers() {
     setUsername(user.username);
     setPassword('');
     setPosition(user.position);
-    setIsActive(user.is_active);
     setError('');
     setModalMode('edit');
   };
@@ -77,7 +74,6 @@ export default function SupervisorUsers() {
             username,
             password,
             position,
-            is_active: isActive,
           }),
         });
       }
@@ -92,7 +88,7 @@ export default function SupervisorUsers() {
   };
 
   const handleDelete = async (user: ApiUser) => {
-    const confirmed = window.confirm(`Inativar o usuario ${user.name}?`);
+    const confirmed = window.confirm(`Excluir definitivamente o usuario ${user.name}?`);
     if (!confirmed) return;
 
     try {
@@ -101,7 +97,7 @@ export default function SupervisorUsers() {
       });
       await loadUsers();
     } catch (error) {
-      setError(error instanceof Error ? error.message : 'Nao foi possivel inativar.');
+      setError(error instanceof Error ? error.message : 'Nao foi possivel excluir.');
     }
   };
 
@@ -138,7 +134,6 @@ export default function SupervisorUsers() {
                   <th className="text-left px-4 py-3 text-sm text-slate-600 dark:text-slate-300">Nome</th>
                   <th className="text-left px-4 py-3 text-sm text-slate-600 dark:text-slate-300">Username</th>
                   <th className="text-left px-4 py-3 text-sm text-slate-600 dark:text-slate-300">Cargo</th>
-                  <th className="text-left px-4 py-3 text-sm text-slate-600 dark:text-slate-300">Ativo/Inativo</th>
                   <th className="text-left px-4 py-3 text-sm text-slate-600 dark:text-slate-300">Data de criacao</th>
                   <th className="text-left px-4 py-3 text-sm text-slate-600 dark:text-slate-300">Acoes</th>
                 </tr>
@@ -149,17 +144,6 @@ export default function SupervisorUsers() {
                     <td className="px-4 py-3 text-slate-900 dark:text-slate-100">{user.name}</td>
                     <td className="px-4 py-3 text-slate-700 dark:text-slate-300">{user.username}</td>
                     <td className="px-4 py-3 text-slate-700 dark:text-slate-300">{user.position}</td>
-                    <td className="px-4 py-3">
-                      <span
-                        className={`px-3 py-1 rounded-full text-sm ${
-                          user.is_active
-                            ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-200'
-                            : 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300'
-                        }`}
-                      >
-                        {user.is_active ? 'Ativo' : 'Inativo'}
-                      </span>
-                    </td>
                     <td className="px-4 py-3 text-slate-700 dark:text-slate-300">
                       {formatDateTime(user.created_at)}
                     </td>
@@ -267,18 +251,6 @@ export default function SupervisorUsers() {
                 <option value="SUPERVISOR">SUPERVISOR</option>
               </select>
             </label>
-
-            {modalMode === 'edit' && (
-              <label className="flex items-center gap-3 mb-5 text-slate-700 dark:text-slate-200">
-                <input
-                  type="checkbox"
-                  checked={isActive}
-                  onChange={(event) => setIsActive(event.target.checked)}
-                  className="h-5 w-5 rounded border-slate-300"
-                />
-                Usuario ativo
-              </label>
-            )}
 
             <div className="flex justify-end gap-3">
               <button

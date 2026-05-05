@@ -173,7 +173,7 @@ export async function updateUserPosition(id, position) {
   return mapUser(await getUserById(id));
 }
 
-export async function updateUser(id, { name, username, password, position, isActive }) {
+export async function updateUser(id, { name, username, password, position }) {
   const current = await getUserById(id);
   if (!current) return null;
 
@@ -185,7 +185,6 @@ export async function updateUser(id, { name, username, password, position, isAct
             login = @username,
             senha_hash = @password,
             tipo_usuario_id = @typeId,
-            ativo = @isActive,
             atualizado = getdate()
         where id = @id
       `,
@@ -195,7 +194,6 @@ export async function updateUser(id, { name, username, password, position, isAct
         username: { type: sql.NVarChar(255), value: username },
         password: { type: sql.NVarChar(255), value: password || current.senha_hash || current.password_hash },
         typeId: { type: sql.Int, value: typeIdFromPosition(position) },
-        isActive: { type: sql.Bit, value: Boolean(isActive) },
       }
     );
 
@@ -209,7 +207,6 @@ export async function updateUser(id, { name, username, password, position, isAct
           username = ?,
           password_hash = ?,
           position = ?,
-          is_active = ?,
           updated_at = current_timestamp
       where id = ?
     `)
@@ -218,28 +215,28 @@ export async function updateUser(id, { name, username, password, position, isAct
       username,
       password || current.password_hash,
       position,
-      isActive ? 1 : 0,
       id
     );
 
   return mapUser(await getUserById(id));
 }
 
-export async function deactivateUser(id) {
+export async function deleteUser(id) {
   if (isSqlServer) {
-    await sqlQuery(
+    const result = await sqlQuery(
       `
-        update dbo.tb_qlog_usuarios
-        set ativo = 0,
-            atualizado = getdate()
+        delete from dbo.tb_qlog_usuarios
+        output deleted.*
         where id = @id
       `,
       { id: { type: sql.Int, value: Number(id) } }
     );
 
-    return mapUser(await getUserById(id));
+    return mapUser(result.recordset[0]);
   }
 
-  db.prepare('update users set is_active = 0, updated_at = current_timestamp where id = ?').run(id);
-  return mapUser(await getUserById(id));
+  const user = await getUserById(id);
+  if (!user) return null;
+  db.prepare('delete from users where id = ?').run(id);
+  return mapUser(user);
 }

@@ -9,7 +9,7 @@ import * as apontamentosRepository from './repositories/apontamentosRepository.j
 import { getDocumentById, listDocuments } from './repositories/documentsRepository.js';
 import {
   createUser,
-  deactivateUser,
+  deleteUser,
   getUserById,
   getUserByLogin,
   listUsers,
@@ -228,8 +228,6 @@ app.put('/api/supervisor/users/:id', requireSupervisor, async (req, res, next) =
     const username = String(req.body?.username || '').trim();
     const password = String(req.body?.password || '').trim();
     const position = String(req.body?.position || '').trim().toUpperCase();
-    const isActive = req.body?.is_active !== false;
-
     if (!name || !username) {
       return res.status(400).json({ message: 'Nome e username sao obrigatorios.' });
     }
@@ -238,7 +236,7 @@ app.put('/api/supervisor/users/:id', requireSupervisor, async (req, res, next) =
       return res.status(400).json({ message: 'Cargo invalido.' });
     }
 
-    const user = await updateUser(req.params.id, { name, username, password, position, isActive });
+    const user = await updateUser(req.params.id, { name, username, password, position });
     if (!user) return res.status(404).json({ message: 'Usuario nao encontrado.' });
     return res.json({ user });
   } catch (error) {
@@ -248,8 +246,20 @@ app.put('/api/supervisor/users/:id', requireSupervisor, async (req, res, next) =
 
 app.delete('/api/supervisor/users/:id', requireSupervisor, async (req, res, next) => {
   try {
-    return res.json({ user: await deactivateUser(req.params.id) });
+    if (String(req.params.id) === String(mapUser(req.user).id)) {
+      return res.status(400).json({ message: 'Nao e permitido excluir o usuario autenticado.' });
+    }
+
+    const user = await deleteUser(req.params.id);
+    if (!user) return res.status(404).json({ message: 'Usuario nao encontrado.' });
+    return res.json({ user });
   } catch (error) {
+    if (error?.number === 547) {
+      return res.status(409).json({
+        message: 'Nao foi possivel excluir: usuario possui apontamentos ou eventos vinculados.',
+      });
+    }
+
     return next(error);
   }
 });
