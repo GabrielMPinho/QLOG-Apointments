@@ -1,5 +1,6 @@
 import { db, getTableColumns, hasColumn, tableExists } from './lib/database.js';
 import { normalizeOperationCode, OPERATION_CODES } from './lib/operations.js';
+import { hashPassword } from './lib/passwords.js';
 
 function createUsersTableIfNeeded() {
   if (tableExists('users')) return;
@@ -232,8 +233,8 @@ function seedUsersIfNeeded() {
     values (?, ?, ?, ?, ?)
   `);
 
-  insertUser.run('Gabriel Supervisor', 'gabriel', '123456', 'SUPERVISOR', 1);
-  insertUser.run('Joao Separador', 'joao', '123456', 'SEPARADOR', 1);
+  insertUser.run('Gabriel Supervisor', 'gabriel', hashPassword('123456'), 'SUPERVISOR', 1);
+  insertUser.run('Joao Separador', 'joao', hashPassword('123456'), 'SEPARADOR', 1);
 }
 
 function seedDocumentsIfNeeded() {

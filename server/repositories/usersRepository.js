@@ -1,4 +1,5 @@
 import { db, isSqlServer, normalizeActive, sql, sqlQuery } from '../lib/database.js';
+import { hashPassword } from '../lib/passwords.js';
 
 function positionFromTypeId(typeId) {
   return Number(typeId) === 2 ? 'SUPERVISOR' : 'SEPARADOR';
@@ -101,6 +102,8 @@ export async function listUsers() {
 }
 
 export async function createUser({ name, username, password, position }) {
+  const passwordHash = hashPassword(password);
+
   if (isSqlServer) {
     const result = await sqlQuery(
       `
@@ -112,7 +115,7 @@ export async function createUser({ name, username, password, position }) {
         name: { type: sql.NVarChar(255), value: name },
         typeId: { type: sql.Int, value: typeIdFromPosition(position) },
         username: { type: sql.NVarChar(255), value: username },
-        password: { type: sql.NVarChar(255), value: password },
+        password: { type: sql.NVarChar(255), value: passwordHash },
       }
     );
 
@@ -124,7 +127,7 @@ export async function createUser({ name, username, password, position }) {
       insert into users (name, username, password_hash, position, is_active)
       values (?, ?, ?, ?, 1)
     `)
-    .run(name, username, password, position);
+    .run(name, username, passwordHash, position);
 
   return mapUser(await getUserById(result.lastInsertRowid));
 }
@@ -176,6 +179,8 @@ export async function updateUserPosition(id, position) {
 export async function updateUser(id, { name, username, password, position }) {
   const current = await getUserById(id);
   if (!current) return null;
+  const currentPasswordHash = current.senha_hash || current.password_hash;
+  const nextPasswordHash = password ? hashPassword(password) : currentPasswordHash;
 
   if (isSqlServer) {
     await sqlQuery(
@@ -192,7 +197,7 @@ export async function updateUser(id, { name, username, password, position }) {
         id: { type: sql.Int, value: Number(id) },
         name: { type: sql.NVarChar(255), value: name },
         username: { type: sql.NVarChar(255), value: username },
-        password: { type: sql.NVarChar(255), value: password || current.senha_hash || current.password_hash },
+        password: { type: sql.NVarChar(255), value: nextPasswordHash },
         typeId: { type: sql.Int, value: typeIdFromPosition(position) },
       }
     );
@@ -213,12 +218,35 @@ export async function updateUser(id, { name, username, password, position }) {
     .run(
       name,
       username,
-      password || current.password_hash,
+      nextPasswordHash,
       position,
       id
     );
 
   return mapUser(await getUserById(id));
+}
+
+export async function updateUserPasswordHash(id, passwordHash) {
+  if (isSqlServer) {
+    await sqlQuery(
+      `
+        update dbo.tb_qlog_usuarios
+        set senha_hash = @passwordHash,
+            atualizado = getdate()
+        where id = @id
+      `,
+      {
+        id: { type: sql.Int, value: Number(id) },
+        passwordHash: { type: sql.NVarChar(255), value: passwordHash },
+      }
+    );
+
+    return;
+  }
+
+  db
+    .prepare('update users set password_hash = ?, updated_at = current_timestamp where id = ?')
+    .run(passwordHash, id);
 }
 
 export async function deleteUser(id) {

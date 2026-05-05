@@ -4,6 +4,7 @@ import path from 'node:path';
 import { createApontamentosRouter } from './controllers/apontamentosController.js';
 import { isSqlServer, normalizeActive } from './lib/database.js';
 import { normalizeOperationCode } from './lib/operations.js';
+import { hashPassword, isPasswordHash, verifyPassword } from './lib/passwords.js';
 import { initializeDatabase } from './migrations.js';
 import * as apontamentosRepository from './repositories/apontamentosRepository.js';
 import { getDocumentById, listDocuments } from './repositories/documentsRepository.js';
@@ -17,6 +18,7 @@ import {
   updateUserName,
   updateUserPosition,
   updateUser,
+  updateUserPasswordHash,
 } from './repositories/usersRepository.js';
 import { createApontamentosService } from './services/apontamentosService.js';
 
@@ -128,8 +130,12 @@ app.post('/api/login', async (req, res, next) => {
     const user = await getUserByLogin(username);
     const storedPassword = user?.password_hash ?? user?.senha_hash;
 
-    if (!user || !normalizeActive(user.is_active ?? user.ativo) || storedPassword !== password) {
+    if (!user || !normalizeActive(user.is_active ?? user.ativo) || !verifyPassword(password, storedPassword)) {
       return res.status(401).json({ message: 'Usuario ou senha invalidos.' });
+    }
+
+    if (!isPasswordHash(storedPassword)) {
+      await updateUserPasswordHash(user.id, hashPassword(password));
     }
 
     return res.json({ user: mapUser(user) });
