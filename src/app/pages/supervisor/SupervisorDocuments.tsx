@@ -117,15 +117,7 @@ export default function SupervisorDocuments() {
               <option value="EXPEDICAO">Expedição</option>
             </select>
 
-            <select
-              value={filters.origin}
-              onChange={(event) => updateFilter('origin', event.target.value)}
-              className="px-3 py-3 rounded-xl border border-slate-300 dark:border-slate-600 dark:bg-slate-900 dark:text-white"
-            >
-              <option value="">Origem</option>
-              <option value="SF1">SF1</option>
-              <option value="SC5">SC5</option>
-            </select>
+
 
             <input
               value={filters.documentNumber}
