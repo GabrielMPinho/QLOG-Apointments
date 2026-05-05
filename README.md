@@ -2,6 +2,8 @@
 
 QLOG Appointments is a web application for tracking logistics operation appointments. The document is used as operational context, while execution state is controlled by appointments.
 
+---
+
 ## Stack
 
 - React, Vite, and TypeScript
@@ -10,11 +12,14 @@ QLOG Appointments is a web application for tracking logistics operation appointm
 - SQL Server as the production database
 - SQLite fallback for local development
 
+---
+
 ## Requirements
 
 - Node.js 22 or newer
 - npm
-- SQL Server access for production-like usage
+
+---
 
 ## Setup
 
@@ -32,6 +37,8 @@ cp .env.example .env
 
 Update `.env` with your database credentials.
 
+---
+
 ## Environment Variables
 
 | Variable | Description |
@@ -43,9 +50,11 @@ Update `.env` with your database credentials.
 | `SQLSERVER_PORT` | SQL Server port. Defaults to `1433`. |
 | `SQLSERVER_USER` | SQL Server username. |
 | `SQLSERVER_PASSWORD` | SQL Server password. |
-| `SQLSERVER_DATABASE` | SQL Server database name. Defaults to `DADOS_BI`. |
+| `SQLSERVER_DATABASE` | SQL Server database name. |
 | `SQLSERVER_ENCRYPT` | Enables SQL Server encryption when set to `true`. |
 | `SQLSERVER_TRUST_SERVER_CERTIFICATE` | Trusts the SQL Server certificate when set to `true`. |
+
+---
 
 ## Development
 
@@ -79,6 +88,8 @@ Preview the production build:
 npm run preview
 ```
 
+---
+
 ## Docker
 
 Build the production image:
@@ -101,13 +112,16 @@ docker compose up --build
 
 The production container serves both the Express API and the built React app on port `3001`.
 
-If SQL Server runs on the host machine, set `SQLSERVER_HOST=host.docker.internal` in `.env`. If SQL Server is in another container or server, use that service name or network address instead.
+> If SQL Server runs on the host machine, set `SQLSERVER_HOST=host.docker.internal` in `.env`.  
+> If SQL Server is in another container or server, use that service name or network address instead.
 
 Health check:
 
 ```bash
 curl http://localhost:3001/api/health
 ```
+
+---
 
 ## Project Structure
 
@@ -123,6 +137,8 @@ src/app/services/    Frontend API client
 src/styles/          Global styles and Tailwind theme
 ```
 
+---
+
 ## Main Workflow
 
 1. The user signs in.
@@ -133,16 +149,9 @@ src/styles/          Global styles and Tailwind theme
 6. The user finishes the appointment.
 7. The API stores the finish timestamp in the appointments table.
 
-## Database
+---
 
-The SQL Server implementation expects the following tables in `DADOS_BI`:
-
-- `dbo.tb_qlog_usuarios`
-- `dbo.tb_qlog_documentos`
-- `dbo.tb_qlog_apontamentos`
-- `dbo.tb_qlog_eventos_documento`
-
-Supported operations:
+## Supported Operations
 
 - Unloading
 - Checking
@@ -151,6 +160,8 @@ Supported operations:
 - Labeling
 - Shipping
 
+---
+
 ## Repository Hygiene
 
-The repository intentionally excludes generated builds, dependencies, logs, local databases, Playwright artifacts, and real environment files.
+The repository intentionally excludes generated builds, dependencies, logs, local databases, and real environment files. Never commit `.env` or any file containing credentials.
