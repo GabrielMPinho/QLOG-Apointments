@@ -90,21 +90,9 @@ npm run preview
 
 ---
 
-## Docker
+## Production Docker
 
 Build the production image:
-
-```bash
-docker build -t qlog-appointments:latest .
-```
-
-Run the container:
-
-```bash
-docker run --env-file .env -p 3001:3001 qlog-appointments:latest
-```
-
-Or use Docker Compose:
 
 ```bash
 docker compose up --build
